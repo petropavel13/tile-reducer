@@ -1,8 +1,10 @@
 #include "avl_tree.h"
 
-TreeNode* createNode(unsigned long key) {
+TreeNode* createNode(unsigned long key, unsigned short int diff_pixels) {
     TreeNode* new_node = malloc(sizeof(TreeNode));
     new_node->key = key;
+    new_node->diff_pixels = diff_pixels;
+
     new_node->left = NULL;
     new_node->right = NULL;
     new_node->height = 0;
@@ -62,17 +64,32 @@ TreeNode* balance(TreeNode* const p) // балансировка узла p
     return p; // балансировка не нужна
 }
 
-TreeNode* insert(TreeNode* const p, unsigned long key) // вставка ключа k в дерево с корнем p
+TreeNode* find(TreeNode *node, unsigned long key) {
+    if( node == NULL ) {
+        return NULL;
+    }
+
+    if( key < node->key ) {
+        return find(node->left, key);
+    }
+    else if( key > node->key ) {
+        return find(node->right, key);
+    } else {
+        return node;
+    }
+}
+
+TreeNode* insert(TreeNode* const p, unsigned long key, unsigned short int diff_pixels) // вставка ключа k в дерево с корнем p
 {
     if( p == NULL ) {
-        return createNode(key);
+        return createNode(key, diff_pixels);
     }
 
     if( key < p->key ) {
-        p->left = insert(p->left,key);
+        p->left = insert(p->left, key, diff_pixels);
     }
     else {
-        p->right = insert(p->right,key);
+        p->right = insert(p->right, key, diff_pixels);
     }
 
     return balance(p);
@@ -85,7 +102,7 @@ TreeNode* find_min(TreeNode* p) // поиск узла с минимальным
 
 TreeNode* remove_min(TreeNode* const p) // удаление узла с минимальным ключом из дерева p
 {
-    if(p->left == 0) {
+    if(p->left == NULL) {
         return p->right;
     }
 
@@ -94,17 +111,17 @@ TreeNode* remove_min(TreeNode* const p) // удаление узла с мини
     return balance(p);
 }
 
-TreeNode* remove(TreeNode* const p, unsigned long key) // удаление ключа k из дерева p
+TreeNode* remove_node(TreeNode* const p, unsigned long key) // удаление ключа k из дерева p
 {
     if( p == NULL ) {
-        return 0;
+        return NULL;
     }
 
     if( key < p->key ) {
-        p->left = remove(p->left, key);
+        p->left = remove_node(p->left, key);
     }
     else if( key > p->key ) {
-        p->right = remove(p->right, key);
+        p->right = remove_node(p->right, key);
     }
     else //  k == p->key
     {
@@ -125,4 +142,19 @@ TreeNode* remove(TreeNode* const p, unsigned long key) // удаление кл�
     }
 
     return balance(p);
+}
+
+void remove_node_fast(TreeNode* const p) {
+    TreeNode* q = p->left;
+    TreeNode* const r = p->right;
+
+    free(p);
+
+    if( r == NULL ) {
+        return;
+    }
+
+    TreeNode* const min = find_min(r);
+    min->right = remove_min(r);
+    min->left = q;
 }

@@ -4,6 +4,7 @@
 //#include <stddef.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include "avl_tree.h"
 
 typedef struct CacheNode
 {
@@ -14,30 +15,23 @@ typedef struct CacheNode
 } CacheNode;
 
 
-typedef struct CacheEdge {
-    struct CacheEdge* parent;
-    struct CacheEdge* left;
-    struct CacheEdge* right;
-    unsigned long key;
-    unsigned short int diff_pixels;
-} CacheEdge;
-
-typedef struct CacheEdgeSequence {
-    CacheEdge* edge;
-    struct CacheEdgeSequence* prev;
-} CacheEdgeSequence;
+typedef struct CacheRootNodeSequence {
+    TreeNode* tree_node;
+    struct CacheRootNodeSequence* next;
+} CacheRootNodeSequence;
 
 
 typedef struct CacheInfo
 {
     size_t max_cache_size_images;
-    size_t max_cache_size_edges;
+    size_t max_cache_size_tree_nodes;
 
     CacheNode* cache_image_head;
     CacheNode* cache_image_tail;
 
-    CacheEdge* cache_edge_root;
-    CacheEdgeSequence* cache_edge_head;
+    TreeNode* root_tree_node;
+    CacheRootNodeSequence* cache_tree_nodes_sequence_tail;
+    CacheRootNodeSequence* cache_tree_nodes_sequence_head;
 
     unsigned long min_tree_key;
     unsigned long max_tree_key;
@@ -47,7 +41,7 @@ typedef struct CacheInfo
     unsigned int image_hit_count;
     unsigned int image_miss_count;
 
-    unsigned int edges_in_cache;
+    unsigned int tree_nodes_in_cache;
     unsigned int edges_hit_count;
     unsigned int edges_miss_count;
 } CacheInfo;
@@ -55,7 +49,7 @@ typedef struct CacheInfo
 #define CACHE_HIT 1
 #define CACHE_MISS 2
 
-CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_edges, size_t tile_size_bytes);
+CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_tree_nodes, size_t tile_size_bytes);
 
 unsigned char get_tile_data(unsigned int tile_id,
                             CacheInfo *const cache_info,
@@ -69,13 +63,13 @@ inline static unsigned int calc_images_cache_size(CacheInfo* cache_info) {
     return cache_info->images_in_cache * sizeof(CacheNode) + cache_info->images_in_cache * cache_info->tile_size_bytes;
 }
 
-inline static unsigned int calc_edges_cache_size(CacheInfo* cache_info) {
-    return cache_info->edges_in_cache * sizeof(CacheEdge);
+inline static unsigned int calc_tree_nodes_cache_size(CacheInfo* cache_info) {
+    return cache_info->tree_nodes_in_cache * sizeof(TreeNode);
 }
 
 void delete_images_tail(CacheInfo *const cache_info);
 
-void delete_edges_tail(CacheInfo *const cache_info);
+void delete_tree_tail(CacheInfo *const cache_info);
 
 void push_image_to_cache(unsigned int tile_id,
                          unsigned char *tile_data,
@@ -103,9 +97,5 @@ static inline unsigned long make_key(const unsigned int x, const unsigned int y)
 
     return max * max + max + min;
 }
-
-CacheEdge* find_edge(CacheEdge *const head, CacheEdge *const fallback_edge, unsigned long key);
-
-void rebalance(CacheEdge* const new_root, CacheEdge* const parent);
 
 #endif // CACHE_UTILS_H
