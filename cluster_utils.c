@@ -78,16 +78,20 @@ PathPoint* make_group(GroupElement* const rest_tiles,
 
     unsigned int current_rest_count = 0;
 
+    unsigned long key;
+
     while ((temp = temp->next) != NULL) {
         diff = 0;
 
-        res = get_diff(leader_tile->tile_id, temp->node->tile_id, cache_info, &diff);
+        key = make_key(leader_tile->tile_id, temp->node->tile_id);
+
+        res = get_diff(key, cache_info, &diff);
 
         if(res == CACHE_HIT) {
             //
         } else if(res == CACHE_MISS) {
             diff = calc_diff(leader_tile, temp->node, cache_info);
-            push_edge_to_cache(leader_tile->tile_id, temp->node->tile_id, diff, cache_info);
+            push_edge_to_cache(key, diff, cache_info);
         }
 
         if(diff <= max_diff_pixels) {

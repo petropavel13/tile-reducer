@@ -1,6 +1,6 @@
 #include "avl_tree.h"
 
-TreeNode* createNode(unsigned long key, unsigned short int diff_pixels) {
+TreeNode* create_node(unsigned long key, unsigned short int diff_pixels) {
     TreeNode* new_node = malloc(sizeof(TreeNode));
     new_node->key = key;
     new_node->diff_pixels = diff_pixels;
@@ -14,8 +14,8 @@ TreeNode* createNode(unsigned long key, unsigned short int diff_pixels) {
 
 void recalc_height(TreeNode* const p)
 {
-    const unsigned char hl = height(p->left);
-    const unsigned char hr = height(p->right);
+    const unsigned char hl = get_height(p->left);
+    const unsigned char hr = get_height(p->right);
     p->height = (hl > hr ? hl : hr) + 1;
 }
 
@@ -82,7 +82,7 @@ TreeNode* find(TreeNode *node, unsigned long key) {
 TreeNode* insert(TreeNode* const p, unsigned long key, unsigned short int diff_pixels) // вставка ключа k в дерево с корнем p
 {
     if( p == NULL ) {
-        return createNode(key, diff_pixels);
+        return create_node(key, diff_pixels);
     }
 
     if( key < p->key ) {
@@ -142,19 +142,4 @@ TreeNode* remove_node(TreeNode* const p, unsigned long key) // удаление 
     }
 
     return balance(p);
-}
-
-void remove_node_fast(TreeNode* const p) {
-    TreeNode* q = p->left;
-    TreeNode* const r = p->right;
-
-    free(p);
-
-    if( r == NULL ) {
-        return;
-    }
-
-    TreeNode* const min = find_min(r);
-    min->right = remove_min(r);
-    min->left = q;
 }

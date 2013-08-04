@@ -5,14 +5,14 @@
 
 typedef struct TreeNode // структура для представления узлов дерева
 {
-    unsigned long key;
-    unsigned short int diff_pixels;
-    unsigned char height;
+    unsigned long key;    
     struct TreeNode* left;
     struct TreeNode* right;
+    unsigned short int diff_pixels;
+    unsigned char height;
 } TreeNode;
 
-TreeNode* createNode(unsigned long key, unsigned short diff_pixels);
+TreeNode* create_node(unsigned long key, unsigned short diff_pixels);
 
 void recalc_height(TreeNode* const p);
 
@@ -32,17 +32,15 @@ TreeNode* remove_min(TreeNode *const p);
 
 TreeNode* remove_node(TreeNode* const p, unsigned long key);
 
-void remove_node_fast(TreeNode* const p);
 
-
-static inline unsigned char height(const TreeNode* const p)
+static inline unsigned char get_height(const TreeNode* const p)
 {
-    return p ? p->height : 0;
+    return p != NULL ? p->height : 0;
 }
 
 static inline int calc_bfactor(const TreeNode* const p)
 {
-    return height(p->right) - height(p->left);
+    return get_height(p->right) - get_height(p->left);
 }
 
 

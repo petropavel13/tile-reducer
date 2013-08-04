@@ -1,9 +1,7 @@
 #ifndef CACHE_UTILS_H
 #define CACHE_UTILS_H
 
-//#include <stddef.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include "avl_tree.h"
 
 typedef struct CacheNode
@@ -14,13 +12,6 @@ typedef struct CacheNode
     struct CacheNode* next;
 } CacheNode;
 
-
-typedef struct CacheRootNodeSequence {
-    TreeNode* tree_node;
-    struct CacheRootNodeSequence* next;
-} CacheRootNodeSequence;
-
-
 typedef struct CacheInfo
 {
     size_t max_cache_size_images;
@@ -30,11 +21,6 @@ typedef struct CacheInfo
     CacheNode* cache_image_tail;
 
     TreeNode* root_tree_node;
-    CacheRootNodeSequence* cache_tree_nodes_sequence_tail;
-    CacheRootNodeSequence* cache_tree_nodes_sequence_head;
-
-    unsigned long min_tree_key;
-    unsigned long max_tree_key;
 
     unsigned int images_in_cache;
     size_t tile_size_bytes;
@@ -55,8 +41,7 @@ unsigned char get_tile_data(unsigned int tile_id,
                             CacheInfo *const cache_info,
                             unsigned char **const tile_data);
 
-unsigned char get_diff(unsigned int left_tile_id,
-                       unsigned int right_tile_id,
+unsigned char get_diff(unsigned long key,
                        CacheInfo *cache_info, unsigned short *diff_pixels);
 
 inline static unsigned int calc_images_cache_size(CacheInfo* cache_info) {
@@ -75,8 +60,7 @@ void push_image_to_cache(unsigned int tile_id,
                          unsigned char *tile_data,
                          CacheInfo* cache_info);
 
-void push_edge_to_cache(unsigned int left_tile_id,
-                        unsigned int right_tile_id,
+void push_edge_to_cache(unsigned long key,
                         unsigned short int diff_pixels,
                         CacheInfo* cache_info);
 
@@ -84,7 +68,7 @@ void clear_cache(CacheInfo *const cache_info);
 
 static inline void sort_min_max(const unsigned int* min, const unsigned int* max) {
     if(max < min) {
-        const unsigned int* tmp = max;
+        const unsigned int* const tmp = max;
         max = min;
         min = tmp;
     }

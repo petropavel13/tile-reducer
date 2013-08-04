@@ -19,11 +19,11 @@ typedef struct PathPoint {
 } PathPoint;
 
 typedef struct SelectedPoint {
+    struct GroupElement* sequence_head;
     Tile* leader_node;
     unsigned int group_id;
     unsigned int groups_count;
     unsigned int rest_count;
-    struct GroupElement* sequence_head;
 } SelectedPoint;
 
 void clusterize(GroupElement *const tiles_sequence,

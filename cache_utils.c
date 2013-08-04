@@ -11,11 +11,6 @@ CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_tree_n
     cache_info->cache_image_tail = NULL;
 
     cache_info->root_tree_node = NULL;
-    cache_info->cache_tree_nodes_sequence_tail = NULL;
-    cache_info->cache_tree_nodes_sequence_head = NULL;
-
-    cache_info->min_tree_key = UINT64_MAX;
-    cache_info->max_tree_key = 0;
 
     cache_info->images_in_cache = 0;
     cache_info->image_hit_count = 0;
@@ -85,24 +80,24 @@ unsigned char get_tile_data(unsigned int tile_id,
     return CACHE_MISS;
 }
 
-unsigned char get_diff(unsigned int left_tile_id,
-                       unsigned int right_tile_id,
-                       CacheInfo* cache_info,
-                       unsigned short int* diff_pixels) {
+unsigned char get_diff(unsigned long key,
+                       CacheInfo *cache_info,
+                       unsigned short *diff_pixels) {
     TreeNode* const current_edge_root = cache_info->root_tree_node;
 
     if(current_edge_root == NULL) {
+        cache_info->edges_miss_count++;
         return CACHE_MISS;
     }
-
-    const unsigned long key = make_key(left_tile_id, right_tile_id);
 
     const TreeNode* const tree_node = find(current_edge_root, key);
 
     if(tree_node == NULL) {
+        cache_info->edges_miss_count++;
         return CACHE_MISS;
     } else {
         (*diff_pixels) = tree_node->diff_pixels;
+        cache_info->edges_hit_count++;
         return CACHE_HIT;
     }
 }
@@ -121,14 +116,7 @@ void delete_images_tail(CacheInfo* const cache_info) {
 }
 
 void delete_tree_tail(CacheInfo* const cache_info) {
-    CacheRootNodeSequence* const new_sequence_head = cache_info->cache_tree_nodes_sequence_tail->next;
-    TreeNode* const tail_node = cache_info->cache_tree_nodes_sequence_tail->tree_node;
-
-    remove_node_fast(tail_node);
-
-    free(cache_info->cache_tree_nodes_sequence_tail);
-
-    cache_info->cache_tree_nodes_sequence_tail = new_sequence_head;
+    cache_info->root_tree_node = remove_min(cache_info->root_tree_node);
 
     cache_info->tree_nodes_in_cache--;
 }
@@ -160,27 +148,16 @@ void push_image_to_cache(unsigned int tile_id,
     cache_info->images_in_cache++;
 }
 
-void push_edge_to_cache(unsigned int left_tile_id,
-                        unsigned int right_tile_id,
-                        unsigned short diff_pixels, CacheInfo *cache_info) {
+void push_edge_to_cache(unsigned long key,
+                        unsigned short diff_pixels,
+                        CacheInfo *cache_info) {
     while(calc_tree_nodes_cache_size(cache_info) >= cache_info->max_cache_size_tree_nodes) {
         delete_tree_tail(cache_info);
     }
 
-    const unsigned long key = make_key(left_tile_id, right_tile_id);
+    TreeNode* const new_tree_head = insert(cache_info->root_tree_node, key, diff_pixels);
 
-    TreeNode* const new_tree_node = insert(cache_info->root_tree_node, key, diff_pixels);
-
-    CacheRootNodeSequence* const new_sequence_item = malloc(sizeof(CacheRootNodeSequence));
-    new_sequence_item->next = NULL;
-    new_sequence_item->tree_node = new_tree_node;
-
-    if(cache_info->tree_nodes_in_cache < 1) {
-        cache_info->cache_tree_nodes_sequence_tail = new_sequence_item;
-    } else {
-        cache_info->cache_tree_nodes_sequence_head->next = new_sequence_item;
-        cache_info->cache_tree_nodes_sequence_head = new_sequence_item;
-    }
+    cache_info->root_tree_node = new_tree_head;
 
     cache_info->tree_nodes_in_cache++;
 }
@@ -203,9 +180,6 @@ void clear_cache(CacheInfo* const cache_info) {
 
     cache_info->cache_image_head = NULL;
     cache_info->cache_image_tail = NULL;
-
-    cache_info->cache_tree_nodes_sequence_tail = NULL;
-    cache_info->cache_tree_nodes_sequence_head = NULL;
 
     cache_info->root_tree_node = NULL;
 }
