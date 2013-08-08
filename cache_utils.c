@@ -3,20 +3,26 @@
 CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_tree_nodes, size_t tile_size_bytes) {
     CacheInfo* const cache_info = malloc(sizeof(CacheInfo));
 
-    cache_info->max_cache_size_images = max_cache_size_images;
-    cache_info->max_cache_size_tree_nodes = max_cache_size_tree_nodes;
+    cache_info->max_cache_size_images_nodes = max_cache_size_images;
+    cache_info->max_cache_size_edge_nodes = max_cache_size_tree_nodes;
     cache_info->tile_size_bytes = tile_size_bytes;
 
-    cache_info->cache_image_head = NULL;
-    cache_info->cache_image_tail = NULL;
+    cache_info->images_root_node = NULL;
 
-    cache_info->root_tree_node = NULL;
+    cache_info->images_tree_info = malloc(sizeof(TreeInfo));
+    cache_info->images_tree_info->data_destructor = &image_data_destructor;
 
-    cache_info->images_in_cache = 0;
+
+    cache_info->edges_root_node = NULL;
+
+    cache_info->edges_tree_info = malloc(sizeof(TreeInfo));
+    cache_info->edges_tree_info->data_destructor = &edge_data_destructor;
+
+    cache_info->images_nodes_in_cache = 0;
     cache_info->image_hit_count = 0;
     cache_info->image_miss_count = 0;
 
-    cache_info->tree_nodes_in_cache = 0;
+    cache_info->edges_nodes_in_cache = 0;
     cache_info->edges_hit_count = 0;
     cache_info->edges_miss_count = 0;
 
@@ -27,76 +33,42 @@ CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_tree_n
 unsigned char get_tile_data(unsigned int tile_id,
                             CacheInfo* const cache_info,
                             unsigned char** const tile_data) {
-    CacheNode* const current_image_head = cache_info->cache_image_head;
+    GenericNode* const current_images_root = cache_info->images_root_node;
 
-
-    if(current_image_head == NULL) {
+    if(current_images_root == NULL) {
+        cache_info->image_miss_count++;
         return CACHE_MISS;
     }
 
-    if(current_image_head->tile_id == tile_id) {
-        (*tile_data) = current_image_head->tile_data;
+    const GenericNode* const images_tree_node = find(current_images_root, tile_id);
 
+    if(images_tree_node == NULL) {
+        cache_info->image_miss_count++;
+        return CACHE_MISS;
+    } else {
+        (*tile_data) = images_tree_node->data;
         cache_info->image_hit_count++;
-
         return CACHE_HIT;
     }
-
-    CacheNode* temp = current_image_head;
-
-    while((temp = temp->prev) != NULL) {
-        if(temp->tile_id == tile_id) {
-            (*tile_data) = temp->tile_data;
-
-            CacheNode* const new_cache_head = temp;
-
-            // move hit node to head
-
-            CacheNode* const node_before_hit = new_cache_head->prev;
-            CacheNode* const node_after_hit = new_cache_head->next;
-
-            if(node_before_hit != NULL) {
-                node_before_hit->next = node_after_hit;
-            } else {
-                cache_info->cache_image_tail = node_after_hit;
-            }
-
-            node_after_hit->prev = node_before_hit; // NULL or node_before_hit
-
-            new_cache_head->prev = current_image_head;
-            new_cache_head->next = NULL;
-            current_image_head->next = new_cache_head;
-
-            cache_info->cache_image_head = new_cache_head;
-
-            cache_info->image_hit_count++;
-
-            return CACHE_HIT;
-        }
-    }
-
-    cache_info->image_miss_count++;
-
-    return CACHE_MISS;
 }
 
 unsigned char get_diff(unsigned long key,
                        CacheInfo *cache_info,
-                       unsigned short *diff_pixels) {
-    TreeNode* const current_edge_root = cache_info->root_tree_node;
+                       unsigned short* const diff_pixels) {
+    GenericNode* const current_edge_root = cache_info->edges_root_node;
 
     if(current_edge_root == NULL) {
         cache_info->edges_miss_count++;
         return CACHE_MISS;
     }
 
-    const TreeNode* const tree_node = find(current_edge_root, key);
+    const GenericNode* const edges_tree_node = find(current_edge_root, key);
 
-    if(tree_node == NULL) {
+    if(edges_tree_node == NULL) {
         cache_info->edges_miss_count++;
         return CACHE_MISS;
     } else {
-        (*diff_pixels) = tree_node->diff_pixels;
+        (*diff_pixels) = (*((unsigned short int*)edges_tree_node->data));
         cache_info->edges_hit_count++;
         return CACHE_HIT;
     }
@@ -104,72 +76,57 @@ unsigned char get_diff(unsigned long key,
 
 
 void delete_images_tail(CacheInfo* const cache_info) {
-    CacheNode* const tail = cache_info->cache_image_tail;
-    tail->next->prev = NULL;
+    cache_info->images_root_node = remove_node(cache_info->images_root_node, find_min(cache_info->images_root_node)->key, cache_info->images_tree_info);
 
-    cache_info->cache_image_tail = tail->next;
-
-    free(tail->tile_data);
-    free(tail);
-
-    cache_info->images_in_cache--;
+    cache_info->images_nodes_in_cache--;
 }
 
-void delete_tree_tail(CacheInfo* const cache_info) {
-    cache_info->root_tree_node = remove_min(cache_info->root_tree_node);
+void delete_edges_tail(CacheInfo* const cache_info) {
+    cache_info->edges_root_node = remove_node(cache_info->edges_root_node, find_min(cache_info->edges_root_node)->key, cache_info->edges_tree_info);
 
-    cache_info->tree_nodes_in_cache--;
+    cache_info->edges_nodes_in_cache--;
 }
 
 
 void push_image_to_cache(unsigned int tile_id,
                          unsigned char* tile_data,
                          CacheInfo* cache_info) {
-    while(calc_images_cache_size(cache_info) >= cache_info->max_cache_size_images) {
+    while(calc_images_nodes_cache_size(cache_info) >= cache_info->max_cache_size_images_nodes) {
         delete_images_tail(cache_info);
     }
 
-    CacheNode* const old_cache_head = cache_info->cache_image_head;
+    GenericNode* const new_tree_head = insert(cache_info->images_root_node, tile_id, tile_data);
 
-    CacheNode* const new_cache_head = malloc(sizeof(CacheNode));
+    cache_info->images_root_node = new_tree_head;
 
-    new_cache_head->prev = old_cache_head;
-    new_cache_head->tile_id = tile_id;
-    new_cache_head->tile_data = tile_data;
-    new_cache_head->next = NULL;
-
-    if(old_cache_head != NULL) {
-        old_cache_head->next = new_cache_head;
-    } else { // it's first push - > head == tail
-        cache_info->cache_image_tail = new_cache_head;
-    }
-
-    cache_info->cache_image_head = new_cache_head;
-    cache_info->images_in_cache++;
+    cache_info->images_nodes_in_cache++;
 }
 
 void push_edge_to_cache(unsigned long key,
                         unsigned short diff_pixels,
                         CacheInfo *cache_info) {
-    while(calc_tree_nodes_cache_size(cache_info) >= cache_info->max_cache_size_tree_nodes) {
-        delete_tree_tail(cache_info);
+    while(calc_edge_nodes_cache_size(cache_info) >= cache_info->max_cache_size_edge_nodes) {
+        delete_edges_tail(cache_info);
     }
 
-    TreeNode* const new_tree_head = insert(cache_info->root_tree_node, key, diff_pixels);
+    unsigned short int* const l_diff_pixels = malloc(sizeof(unsigned short int));
+    (*l_diff_pixels) = diff_pixels;
 
-    cache_info->root_tree_node = new_tree_head;
+    GenericNode* const new_tree_head = insert(cache_info->edges_root_node, key, l_diff_pixels);
 
-    cache_info->tree_nodes_in_cache++;
+    cache_info->edges_root_node = new_tree_head;
+
+    cache_info->edges_nodes_in_cache++;
 }
 
 
-void clear_cache(CacheInfo* const cache_info) {
-    while(cache_info->images_in_cache > 0) {
+void delete_cache(CacheInfo* cache_info) {
+    while(cache_info->images_nodes_in_cache > 0) {
         delete_images_tail(cache_info);
     }
 
-    while(cache_info->tree_nodes_in_cache > 0) {
-        delete_tree_tail(cache_info);
+    while(cache_info->edges_nodes_in_cache > 0) {
+        delete_edges_tail(cache_info);
     }
 
     cache_info->image_hit_count = 0;
@@ -178,8 +135,9 @@ void clear_cache(CacheInfo* const cache_info) {
     cache_info->edges_hit_count = 0;
     cache_info->edges_miss_count = 0;
 
-    cache_info->cache_image_head = NULL;
-    cache_info->cache_image_tail = NULL;
+    free(cache_info->images_tree_info);
 
-    cache_info->root_tree_node = NULL;
+    free(cache_info->edges_tree_info);
+
+    free(cache_info);
 }

@@ -185,13 +185,11 @@ __global__ void sum_z_dimension_one_cude(unsigned char* cube,
 
     unsigned short result = 0;
 
-    // temp = cube[index_in_3d(x, x_size, y, 0, z_size)]
+    const unsigned int temp_index = index_in_3d(x, 256, y, 0, 4);
 
     for (int i = 0; i < 4; ++i)
     {
-        // result += cube[temp + i];
-        // profile profit !
-        result += cube[index_in_3d(x, 256, y, i, 4)];
+        result += cube[temp_index + i];
     }
 
     matrix_result[index_in_matrix] = 1 * (result > 0);
@@ -234,17 +232,14 @@ __global__ void sum_x_dimension_one_vector(unsigned short int* vector,
 
     __syncthreads();
 
-//    unsigned int overhead_check;
+    unsigned int overhead_check;
 
     for(unsigned int s = 256 / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
     {
         if(column_number < s)
         {
-//            prevent ushort overflow
-//            profile me!
-//            overhead_check = temp_results[column_number] + temp_results[column_number + s];
-//            temp_results[column_number] += overhead_check - (1 * (overhead_check >= 65535));
-            temp_results[column_number] += temp_results[column_number + s] - (1 * ((temp_results[column_number] + temp_results[column_number + s]) >= 65535));
+            overhead_check = temp_results[column_number] + temp_results[column_number + s];
+            temp_results[column_number] += overhead_check - (1 * (overhead_check >= 65535));
         }
 
         __syncthreads();

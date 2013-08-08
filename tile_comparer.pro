@@ -9,7 +9,7 @@ SOURCES += main.c \
     cache_utils.c \
     db_utils.c \
     cluster_utils.c \
-    avl_tree.c
+    generic_avl_tree.c
 
 OTHER_FILES += \
     cuda_functions.cu \
@@ -23,7 +23,7 @@ HEADERS += \
     db_utils.h \
     gpu_utils.h \
     cluster_utils.h \
-    avl_tree.h
+    generic_avl_tree.h
 
 INCLUDEPATH += "/usr/include/postgresql"
 

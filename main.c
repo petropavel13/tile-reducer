@@ -169,7 +169,7 @@ int main(int argc, char* argv [])
     printf("images | hits: %d, misses: %d, ratio: %f\n", images_hits, images_misses, ((float) images_hits / (float) images_misses));
     printf("diffs  | hits: %d, misses: %d, ratio: %f\n", diffs_hits, diffs_misses, ((float) diffs_hits / (float) diffs_misses));
 
-    clear_cache(cache_info);
+    delete_cache(cache_info);
 
     return 0;
 }

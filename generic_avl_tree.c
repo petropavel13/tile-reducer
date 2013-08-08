@@ -1,9 +1,9 @@
-#include "avl_tree.h"
+#include "generic_avl_tree.h"
 
-TreeNode* create_node(unsigned long key, unsigned short int diff_pixels) {
-    TreeNode* new_node = malloc(sizeof(TreeNode));
+GenericNode* create_node(unsigned long key, void *data) {
+    GenericNode* new_node = malloc(sizeof(GenericNode));
     new_node->key = key;
-    new_node->diff_pixels = diff_pixels;
+    new_node->data = data;
 
     new_node->left = NULL;
     new_node->right = NULL;
@@ -12,16 +12,16 @@ TreeNode* create_node(unsigned long key, unsigned short int diff_pixels) {
     return new_node;
 }
 
-void recalc_height(TreeNode* const p)
+void recalc_height(GenericNode* const p)
 {
     const unsigned char hl = get_height(p->left);
     const unsigned char hr = get_height(p->right);
     p->height = (hl > hr ? hl : hr) + 1;
 }
 
-TreeNode* rotate_right(TreeNode* p) // правый поворот вокруг p
+GenericNode* rotate_right(GenericNode* p) // правый поворот вокруг p
 {
-    TreeNode* const q = p->left;
+    GenericNode* const q = p->left;
     p->left = q->right;
     q->right = p;
     recalc_height(p);
@@ -29,9 +29,9 @@ TreeNode* rotate_right(TreeNode* p) // правый поворот вокруг 
     return q;
 }
 
-TreeNode* rotate_left(TreeNode* q) // левый поворот вокруг q
+GenericNode* rotate_left(GenericNode* q) // левый поворот вокруг q
 {
-    TreeNode* const p = q->right;
+    GenericNode* const p = q->right;
     q->right = p->left;
     p->left = q;
     recalc_height(q);
@@ -39,7 +39,7 @@ TreeNode* rotate_left(TreeNode* q) // левый поворот вокруг q
     return p;
 }
 
-TreeNode* balance(TreeNode* const p) // балансировка узла p
+GenericNode* balance(GenericNode* const p) // балансировка узла p
 {
     recalc_height(p);
 
@@ -64,7 +64,7 @@ TreeNode* balance(TreeNode* const p) // балансировка узла p
     return p; // балансировка не нужна
 }
 
-TreeNode* find(TreeNode *node, unsigned long key) {
+GenericNode* find(GenericNode *node, unsigned long key) {
     if( node == NULL ) {
         return NULL;
     }
@@ -79,28 +79,28 @@ TreeNode* find(TreeNode *node, unsigned long key) {
     }
 }
 
-TreeNode* insert(TreeNode* const p, unsigned long key, unsigned short int diff_pixels) // вставка ключа k в дерево с корнем p
+GenericNode* insert(GenericNode* const p, unsigned long key, void* data) // вставка ключа k в дерево с корнем p
 {
     if( p == NULL ) {
-        return create_node(key, diff_pixels);
+        return create_node(key, data);
     }
 
     if( key < p->key ) {
-        p->left = insert(p->left, key, diff_pixels);
+        p->left = insert(p->left, key, data);
     }
     else {
-        p->right = insert(p->right, key, diff_pixels);
+        p->right = insert(p->right, key, data);
     }
 
     return balance(p);
 }
 
-TreeNode* find_min(TreeNode* p) // поиск узла с минимальным ключом в дереве p
+GenericNode* find_min(GenericNode* p) // поиск узла с минимальным ключом в дереве p
 {
     return p->left != NULL ? find_min(p->left) : p;
 }
 
-TreeNode* remove_min(TreeNode* const p) // удаление узла с минимальным ключом из дерева p
+GenericNode* remove_min(GenericNode* const p) // удаление узла с минимальным ключом из дерева p
 {
     if(p->left == NULL) {
         return p->right;
@@ -111,30 +111,31 @@ TreeNode* remove_min(TreeNode* const p) // удаление узла с мини
     return balance(p);
 }
 
-TreeNode* remove_node(TreeNode* const p, unsigned long key) // удаление ключа k из дерева p
+GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo* const tree_info) // удаление ключа k из дерева p
 {
     if( p == NULL ) {
         return NULL;
     }
 
     if( key < p->key ) {
-        p->left = remove_node(p->left, key);
+        p->left = remove_node(p->left, key, tree_info);
     }
     else if( key > p->key ) {
-        p->right = remove_node(p->right, key);
+        p->right = remove_node(p->right, key, tree_info);
     }
     else //  k == p->key
     {
-        TreeNode* q = p->left;
-        TreeNode* const r = p->right;
+        GenericNode* q = p->left;
+        GenericNode* const r = p->right;
 
+        tree_info->data_destructor(p->data);
         free(p);
 
         if( r == NULL ) {
             return q;
         }
 
-        TreeNode* const min = find_min(r);
+        GenericNode* const min = find_min(r);
         min->right = remove_min(r);
         min->left = q;
 
