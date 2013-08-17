@@ -144,3 +144,16 @@ GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo
 
     return balance(p);
 }
+
+void destroy_tree(GenericNode* root_node, const TreeInfo* const tree_info) {
+    GenericNode* node = root_node;
+
+    if(node != NULL) {
+        destroy_tree(node->left, tree_info);
+        destroy_tree(node->right, tree_info);
+
+        tree_info->data_destructor(node->data);
+
+        free(node);
+    }
+}

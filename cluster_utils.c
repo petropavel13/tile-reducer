@@ -5,7 +5,7 @@ void clusterize(GroupElement* const tiles_sequence,
                 unsigned int max_diff_pixels,
                 unsigned int max_allowed_tiles,
                 CacheInfo *const cache_info,
-                PGconn *conn) {
+                DbInfo* const db_info) {
     SelectedPoint* const root_selected_point = malloc(sizeof(SelectedPoint));
     root_selected_point->groups_count = 0;
     root_selected_point->group_id = 0;
@@ -19,17 +19,17 @@ void clusterize(GroupElement* const tiles_sequence,
     root_path->child_right = NULL;
     root_path->selected_point = root_selected_point;
 
-    PathPoint* left_path = make_group(tiles_sequence, total, 1, root_path, cache_info, conn, max_diff_pixels, max_allowed_tiles, 1);
-    PathPoint* right_path = make_group(tiles_sequence, total, 0, root_path, cache_info, conn, max_diff_pixels, max_allowed_tiles, 1);
+    PathPoint* left_path = make_group(tiles_sequence, total, 1, root_path, cache_info, db_info, max_diff_pixels, max_allowed_tiles, 1);
+    PathPoint* right_path = make_group(tiles_sequence, total, 0, root_path, cache_info, db_info, max_diff_pixels, max_allowed_tiles, 1);
 
     const char best_select = choose_best(left_path, right_path);
 
     if(best_select == -1) {
-        delete_path(right_path, conn);
+        delete_path(right_path, db_info);
     } else if(best_select == 1) {
-        delete_path(left_path, conn);
+        delete_path(left_path, db_info);
     } else if(best_select == 0) {
-        delete_path(left_path, conn); // or right
+        delete_path(left_path, db_info); // or right
     }
 }
 
@@ -38,7 +38,7 @@ PathPoint* make_group(GroupElement* const rest_tiles,
                       unsigned int offset,
                       PathPoint *const parent_path,
                       CacheInfo *const cache_info,
-                      PGconn *conn,
+                      DbInfo* const db_info,
                       unsigned int max_diff_pixels,
                       unsigned int max_allowed_tiles,
                       unsigned int max_allowed_groups) {
@@ -61,7 +61,7 @@ PathPoint* make_group(GroupElement* const rest_tiles,
     child_left->selected_point = NULL;
 
 
-    PathPoint* left_path = make_group(rest_tiles, total, ++offset, child_left, cache_info, conn, max_diff_pixels, max_allowed_tiles, max_allowed_groups);
+    PathPoint* left_path = make_group(rest_tiles, total, ++offset, child_left, cache_info, db_info, max_diff_pixels, max_allowed_tiles, max_allowed_groups);
 
 
     GroupElement* current_rest = malloc(sizeof(GroupElement));
@@ -70,7 +70,7 @@ PathPoint* make_group(GroupElement* const rest_tiles,
 
     Tile* const leader_tile = temp->node;
 
-    const unsigned int group_id = create_group(conn, leader_tile->tile_id, leader_tile->tile_id);
+    const unsigned int group_id = create_virtual_group(db_info/*, leader_tile->tile_id, leader_tile->tile_id*/);
 
     unsigned short int diff;
 
@@ -95,7 +95,7 @@ PathPoint* make_group(GroupElement* const rest_tiles,
         }
 
         if(diff <= max_diff_pixels) {
-            add_tile_to_group(conn, group_id, temp->node->tile_id);
+            add_tile_to_group(db_info, group_id, temp->node->tile_id);
         } else {
             current_rest->node = temp->node;
 
@@ -142,25 +142,25 @@ PathPoint* make_group(GroupElement* const rest_tiles,
     PathPoint* right_path = child_right;
 
     if(right_selected_point->groups_count <= max_allowed_groups) {
-        right_path = make_group(current_rest, total, 0, child_right, cache_info, conn, max_diff_pixels, max_allowed_tiles, max_allowed_groups);
+        right_path = make_group(current_rest, total, 0, child_right, cache_info, db_info, max_diff_pixels, max_allowed_tiles, max_allowed_groups);
     }
 
     const char best_select = choose_best(left_path, right_path);
 
     if(best_select == -1) {
-        delete_path(right_path, conn);
+        delete_path(right_path, db_info);
 
         parent_path->child_left = child_left;
 
         return left_path;
     } else if(best_select == 1) {
-        delete_path(left_path, conn);
+        delete_path(left_path, db_info);
 
         parent_path->child_right = child_right;
 
         return right_path;
     } else if(best_select == 0) {
-        delete_path(left_path, conn); // or right
+        delete_path(left_path, db_info); // or right
 
         parent_path->child_right = child_right;
 
@@ -170,7 +170,7 @@ PathPoint* make_group(GroupElement* const rest_tiles,
     return NULL; // impossible
 }
 
-void delete_path(PathPoint* point, PGconn* conn) {
+void delete_path(PathPoint* point, DbInfo* const db_info) {
     if(point->selected_point != NULL) {
         GroupElement* sequence_head = point->selected_point->sequence_head == NULL ? NULL : point->selected_point->sequence_head->first;
         GroupElement* prev = NULL;
@@ -181,7 +181,7 @@ void delete_path(PathPoint* point, PGconn* conn) {
             free(prev);
         }
 
-        delete_group(conn, point->selected_point->group_id);
+        delete_group(db_info, point->selected_point->group_id);
 
         free(point->selected_point);
     }

@@ -31,19 +31,19 @@ void clusterize(GroupElement *const tiles_sequence,
                 unsigned int max_diff_pixels,
                 unsigned int max_allowed_tiles,
                 CacheInfo *const cache_info,
-                PGconn *conn);
+                DbInfo *const db_info);
 
 PathPoint* make_group(GroupElement *const rest_tiles,
                       unsigned int total,
                       unsigned int offset,
                       PathPoint *const parent_path,
                       CacheInfo *const cache_info,
-                      PGconn *conn,
+                      DbInfo *const db_info,
                       unsigned int max_diff_pixels,
                       unsigned int max_allowed_tiles,
                       unsigned int max_allowed_groups);
 
-void delete_path(PathPoint* point, PGconn *conn);
+void delete_path(PathPoint* point, DbInfo *const db_info);
 
 unsigned int get_count_of_sequence(const GroupElement *const head);
 

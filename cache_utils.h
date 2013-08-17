@@ -62,22 +62,6 @@ void push_edge_to_cache(unsigned long key,
 
 void delete_cache(CacheInfo* cache_info);
 
-static inline void sort_min_max(const unsigned int* min, const unsigned int* max) {
-    if(max < min) {
-        const unsigned int* const tmp = max;
-        max = min;
-        min = tmp;
-    }
-}
-
-static inline unsigned long make_key(const unsigned int x, const unsigned int y) {
-    const unsigned int max = x;
-    const unsigned int min = y;
-    sort_min_max(&min, &max);
-
-    return max * max + max + min;
-}
-
 static void edge_data_destructor(void* data) {
     free(data);
 }

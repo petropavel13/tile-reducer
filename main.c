@@ -4,6 +4,7 @@
 #include "cache_utils.h"
 #include "db_utils.h"
 #include "cluster_utils.h"
+#include "color_index_utils.h"
 
 #include <libpq-fe.h>
 
@@ -25,15 +26,10 @@ void print_progress_paths_read(unsigned int current, const char* folder, const c
 #endif
 }
 
-void print_progress_tiles_db_write(unsigned int current, unsigned int total, const char* sql) {
-#ifdef DEBUG
-    printf("SQL: %s\n", sql);
-    fflush(stdout);
-#else
+void print_progress_tiles_db_write(unsigned int current) {
     printf("\r                            ");
-    printf("\rWriting tiles paths...%d / %d", current, total);
+    printf("\rWriting tiles paths to DB...%d", current);
     fflush(stdout);
-#endif
 }
 
 int main(int argc, char* argv [])
@@ -73,6 +69,8 @@ int main(int argc, char* argv [])
         return 1;
     }
 
+    DbInfo* db_info = init_db_info(conn);
+
     printf("done\n");
     fflush(stdout);
 
@@ -86,31 +84,33 @@ int main(int argc, char* argv [])
     printf("\rReading tiles paths...done\n");
     fflush(stdout);
 
-    create_tables_if_not_exists(conn);
+    create_tables_if_not_exists(db_info);
 
-    const unsigned int res = check_tiles_in_db(conn, total);
+//    clear_all_data(db_info);
+
+    const unsigned int res = check_tiles_in_db(db_info, total);
 
     unsigned int* pg_ids = malloc(sizeof(unsigned int) * total);
 
     if(res == TILES_ALREADY_EXISTS) {
         printf("Tiles already in db. Reading ids...\n");
 
-        read_tiles_ids(conn, pg_ids);
+        read_tiles_ids(db_info, pg_ids);
     } else if(res == NO_TILES_IN_DB) {
-        write_tiles_paths_to_pg(conn, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        write_tiles_paths_to_pg(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
-        printf("\rWriting tiles paths...done\n");
+        printf("\rWriting tiles paths to DB...done\n");
         fflush(stdout);
     } else if(res == TILES_COUNT_MISMATCH) {
-        printf("Clean up db\n");
+        printf("Tiles count mismatch. Clean up db.\n");
         fflush(stdout);
 
-        clear_all_data(conn);
-        write_tiles_paths_to_pg(conn, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        clear_all_data(db_info);
+        write_tiles_paths_to_pg(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
-        printf("\rWriting tiles paths...done\n");
+        printf("\rWriting tiles paths to DB...done\n");
         fflush(stdout);
     }
 
@@ -126,7 +126,7 @@ int main(int argc, char* argv [])
     for (unsigned int i = 0; i < total; ++i)
     {
         printf("\r                                                ");
-        printf("\rReading tiles data...%d", i);
+        printf("\rLoading tiles into RAM...%d", i);
         fflush(stdout);
 
         temp_tile = malloc(sizeof(Tile));
@@ -148,7 +148,7 @@ int main(int argc, char* argv [])
 
 
     printf("\r                                                ");
-    printf("\rReading tiles data...done\n");
+    printf("\rLoading tiles into RAM...done\n");
     fflush(stdout);
 
     for (unsigned int i = 0; i < total; ++i)
@@ -156,9 +156,39 @@ int main(int argc, char* argv [])
         free(tiles_paths[i]);
     }
 
-    free(tiles_paths);    
+    free(tiles_paths);
 
-    clusterize(tiles_sequence, total, max_diff_pixels, total / 2, cache_info, conn);
+    TilesTree* const tiles_tree = init_tiles_tree();
+
+    GroupElement* temp_group_elem = tiles_sequence->first;
+
+    for (int i = 0; temp_group_elem != NULL; ++i) {
+        printf("\r                                                ");
+        printf("\rIndexing tiles colors...%d", i);
+        fflush(stdout);
+
+        index_tile(temp_group_elem->node, tiles_tree);
+
+        temp_group_elem = temp_group_elem->next;
+    }
+
+    printf("\r                                                ");
+    printf("\rIndexing tiles colors...done\n");
+    fflush(stdout);
+
+    printf("\r                                                ");
+    printf("\rFlushing tiles colors to db...");
+    fflush(stdout);
+
+    flush_tiles_colors_tree(tiles_tree, db_info);
+
+    printf("\r                                                ");
+    printf("\rFlushing tiles colors to db...done\n");
+    fflush(stdout);
+
+    destroy_tile_color_tree(tiles_tree);
+
+//    clusterize(tiles_sequence, total, max_diff_pixels, total / 2, cache_info, db_info);
 
     const int images_hits = cache_info->image_hit_count;
     const int images_misses = cache_info->image_miss_count;
@@ -170,6 +200,11 @@ int main(int argc, char* argv [])
     printf("diffs  | hits: %d, misses: %d, ratio: %f\n", diffs_hits, diffs_misses, ((float) diffs_hits / (float) diffs_misses));
 
     delete_cache(cache_info);
+
+    delete_db_info(db_info);
+
+    PQfinish(conn);
+//    while(1);
 
     return 0;
 }

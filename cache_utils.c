@@ -121,13 +121,8 @@ void push_edge_to_cache(unsigned long key,
 
 
 void delete_cache(CacheInfo* cache_info) {
-    while(cache_info->images_nodes_in_cache > 0) {
-        delete_images_tail(cache_info);
-    }
-
-    while(cache_info->edges_nodes_in_cache > 0) {
-        delete_edges_tail(cache_info);
-    }
+    destroy_tree(cache_info->edges_root_node, cache_info->edges_tree_info);
+    destroy_tree(cache_info->images_root_node, cache_info->images_tree_info);
 
     cache_info->image_hit_count = 0;
     cache_info->image_miss_count = 0;

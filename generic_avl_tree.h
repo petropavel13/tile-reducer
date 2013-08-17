@@ -37,6 +37,8 @@ GenericNode* remove_min(GenericNode *const p);
 
 GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo *const tree_info);
 
+void destroy_tree(GenericNode* root_node, const TreeInfo* const tree_info);
+
 
 static inline unsigned char get_height(const GenericNode* const p)
 {
@@ -46,6 +48,19 @@ static inline unsigned char get_height(const GenericNode* const p)
 static inline int calc_bfactor(const GenericNode* const p)
 {
     return get_height(p->right) - get_height(p->left);
+}
+
+static inline unsigned long make_key(const unsigned int x, const unsigned int y) {
+    unsigned long max = x;
+    unsigned long min = y;
+
+    if(max < min) {
+        const unsigned int tmp = max;
+        max = min;
+        min = tmp;
+    }
+
+    return max * max + max + min;
 }
 
 #endif // GENERIC_AVL_TREE_H
