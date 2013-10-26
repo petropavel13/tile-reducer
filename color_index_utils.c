@@ -38,26 +38,31 @@ TileColor* create_or_get_tile_color(unsigned int tile_id, unsigned int color, Ti
         GenericNode* const node = find(root_node, key);
 
         if(node == NULL) {
-            goto create_new_tile_color;
+            goto create_and_return;
         } else {
             return node->data;
         }
     } else {
-        goto create_new_tile_color;
+        goto create_and_return;
     }
 
-create_new_tile_color:
+create_and_return:
     {
-        TileColor* const tile_color = malloc(sizeof(TileColor));
-        tile_color->color = color;
-        tile_color->tile_id = tile_id;
-        tile_color->repeat_count = 0;
+        TileColor* const new_color = create_tile_color(tile_id, color);
 
-        tiles_tree->root_node = insert(root_node, key, tile_color);
+        tiles_tree->root_node = insert(root_node, key, new_color);
 
-
-        return tile_color;
+        return new_color;
     }
+}
+
+TileColor* create_tile_color(unsigned int tile_id, unsigned int color) {
+    TileColor* const tile_color = malloc(sizeof(TileColor));
+    tile_color->color = color;
+    tile_color->tile_id = tile_id;
+    tile_color->repeat_count = 0;
+
+    return tile_color;
 }
 
 void destroy_tile_color_tree(TilesTree* tiles_tree) {

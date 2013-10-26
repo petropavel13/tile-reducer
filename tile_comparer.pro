@@ -37,7 +37,7 @@ CUDA_SOURCES += \
     gpu_utils.cu \
     cuda_functions.cu
 
-CUDA_DIR = "/usr/local/cuda-5.0"
+CUDA_DIR = "/usr/local/cuda-5.5"
 
 SYSTEM_NAME = unix
 SYSTEM_TYPE = 64

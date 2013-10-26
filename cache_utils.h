@@ -38,7 +38,8 @@ unsigned char get_tile_data(unsigned int tile_id,
                             unsigned char **const tile_data);
 
 unsigned char get_diff(unsigned long key,
-                       CacheInfo *cache_info, unsigned short *const diff_pixels);
+                       CacheInfo *cache_info,
+                       unsigned short *const diff_pixels);
 
 inline static unsigned int calc_images_nodes_cache_size(const CacheInfo* const cache_info) {
     return cache_info->images_nodes_in_cache * sizeof(GenericNode) + cache_info->images_nodes_in_cache * cache_info->tile_size_bytes;

@@ -68,7 +68,7 @@ unsigned char get_diff(unsigned long key,
         cache_info->edges_miss_count++;
         return CACHE_MISS;
     } else {
-        (*diff_pixels) = (*((unsigned short int*)edges_tree_node->data));
+        (*diff_pixels) = *((unsigned short int*)edges_tree_node->data);
         cache_info->edges_hit_count++;
         return CACHE_HIT;
     }

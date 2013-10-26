@@ -19,7 +19,7 @@ void recalc_height(GenericNode* const p)
     p->height = (hl > hr ? hl : hr) + 1;
 }
 
-GenericNode* rotate_right(GenericNode* p) // правый поворот вокруг p
+GenericNode* rotate_right(GenericNode* p)
 {
     GenericNode* const q = p->left;
     p->left = q->right;
@@ -29,7 +29,7 @@ GenericNode* rotate_right(GenericNode* p) // правый поворот вок�
     return q;
 }
 
-GenericNode* rotate_left(GenericNode* q) // левый поворот вокруг q
+GenericNode* rotate_left(GenericNode* q)
 {
     GenericNode* const p = q->right;
     q->right = p->left;
@@ -39,7 +39,7 @@ GenericNode* rotate_left(GenericNode* q) // левый поворот вокру
     return p;
 }
 
-GenericNode* balance(GenericNode* const p) // балансировка узла p
+GenericNode* balance(GenericNode* const p)
 {
     recalc_height(p);
 
@@ -111,7 +111,7 @@ GenericNode* remove_min(GenericNode* const p) // удаление узла с м
     return balance(p);
 }
 
-GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo* const tree_info) // удаление ключа k из дерева p
+GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo* const tree_info)
 {
     if( p == NULL ) {
         return NULL;

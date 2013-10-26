@@ -24,6 +24,7 @@ void index_tile(const Tile* const tile,
 
 
 TileColor* create_or_get_tile_color(unsigned int tile_id, unsigned int color, TilesTree* tiles_tree);
+TileColor* create_tile_color(unsigned int tile_id, unsigned int color);
 
 void destroy_tile_color_tree(TilesTree* tiles_tree);
 

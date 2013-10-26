@@ -12,6 +12,7 @@
 
 #define DEFAULT_MB_IMAGE_CACHE_SIZE 512
 #define DEFAULT_MB_DIFF_CACHE_SIZE 128
+#define DEFAULT_MB_PG_SQL_BUFFER_SIZE 8
 
 //#define DEBUG 1
 
@@ -69,7 +70,7 @@ int main(int argc, char* argv [])
         return 1;
     }
 
-    DbInfo* db_info = init_db_info(conn);
+    DbInfo* db_info = init_db_info(conn, 1024 * 1024 * DEFAULT_MB_PG_SQL_BUFFER_SIZE);
 
     printf("done\n");
     fflush(stdout);
@@ -86,7 +87,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-//    clear_all_data(db_info);
+    clear_all_data(db_info);
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
@@ -94,6 +95,8 @@ int main(int argc, char* argv [])
 
     if(res == TILES_ALREADY_EXISTS) {
         printf("Tiles already in db. Reading ids...\n");
+
+        clear_session_data(db_info);
 
         read_tiles_ids(db_info, pg_ids);
     } else if(res == NO_TILES_IN_DB) {
