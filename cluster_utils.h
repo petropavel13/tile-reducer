@@ -26,6 +26,12 @@ typedef struct SelectedPoint {
     unsigned int rest_count;
 } SelectedPoint;
 
+#define PERSISTENT_GROUP_NOT_DEFINED 0
+
+void make_persistent_groups(DbInfo* const db_info,
+                            GroupElement *const tiles_sequence,
+                            unsigned int total, CacheInfo *const cache_info);
+
 void clusterize(GroupElement *const tiles_sequence,
                 unsigned int total,
                 unsigned int max_diff_pixels,
@@ -47,29 +53,11 @@ void delete_path(PathPoint* point, DbInfo *const db_info);
 
 unsigned int get_count_of_sequence(const GroupElement *const head);
 
-static inline GroupElement* get_element_with_index(const GroupElement* elem, unsigned int index) {
-    unsigned int current = 0;
-    GroupElement* temp = elem->first;
+GroupElement* get_element_with_index(GroupElement *const search_start_element, unsigned int index);
 
-    while ((current++ < index) && (temp != NULL)) {
-        temp = temp->next;
-    }
+Tile* find_tile_with_id(GroupElement *const search_start_element, unsigned int tile_id);
 
-    return temp;
-}
-
-static inline SelectedPoint* get_selected_point_for_branch(const PathPoint* branch) {
-    SelectedPoint* sp = branch->selected_point;
-
-    const PathPoint* temp = branch;
-
-    while(temp != NULL && sp == NULL) {
-        sp = temp->selected_point;
-        temp = temp->parent;
-    }
-
-    return sp;
-}
+SelectedPoint* get_selected_point_for_branch(const PathPoint* branch);
 
 char choose_best(const PathPoint* left_path, const PathPoint* right_path);
 

@@ -43,7 +43,7 @@ unsigned int get_total_files_count(const char* path);
 void read_tiles_paths(const char* path,
                       char** paths,
                       unsigned int* current,
-                      void (*callback)(unsigned int, const char*, const char*));
+                      void (*callback)(unsigned int));
 
 void delete_tile_file(TileFile* tile_file);
 

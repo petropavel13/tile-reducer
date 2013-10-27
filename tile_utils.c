@@ -51,7 +51,7 @@ unsigned int get_total_files_count(const char* path) {
 void read_tiles_paths(const char* path,
                       char** paths,
                       unsigned int* current,
-                      void (*callback)(unsigned int, const char*, const char*)) {
+                      void (*callback)(unsigned int)) {
     DIR* dir = NULL;
     struct dirent *entry;
 
@@ -72,7 +72,7 @@ void read_tiles_paths(const char* path,
                 paths[(*current)++] = inner_path;
 
                 if(callback != NULL) {
-                    callback((*current), path, entry->d_name);
+                    callback(*current);
                 }
             }
         }

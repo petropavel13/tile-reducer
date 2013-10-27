@@ -157,3 +157,11 @@ void destroy_tree(GenericNode* root_node, const TreeInfo* const tree_info) {
         free(node);
     }
 }
+
+void calc_elements_count(const GenericNode* const node, unsigned long *const count) {
+    if(node != NULL) {
+        (*count)++;
+        calc_elements_count(node->left, count);
+        calc_elements_count(node->right, count);
+    }
+}

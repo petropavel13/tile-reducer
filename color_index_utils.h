@@ -28,9 +28,16 @@ TileColor* create_tile_color(unsigned int tile_id, unsigned int color);
 
 void destroy_tile_color_tree(TilesTree* tiles_tree);
 
-void flush_tiles_colors_tree(const TilesTree* const tiles_tree, const DbInfo* const db_info);
+void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
+                             const DbInfo* const db_info,
+                             void (*callback)(unsigned char));
 
-void flush_tiles_colors_node(const GenericNode* const tile_color_node, const DbInfo* const db_info);
+void flush_tiles_colors_node(const GenericNode* const tile_color_node,
+                             const DbInfo* const db_info,
+                             const unsigned long *const total,
+                             unsigned long *const current,
+                             unsigned char* const last_percent,
+                             void (*callback)(unsigned char));
 
 static void tile_color_destructor(void* data) {
     free(data);

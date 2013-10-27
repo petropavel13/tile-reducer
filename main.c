@@ -16,20 +16,21 @@
 
 //#define DEBUG 1
 
-void print_progress_paths_read(unsigned int current, const char* folder, const char* file) {
-#ifdef DEBUG
-    printf("Read: %s | %s\n", folder, file);
-    fflush(stdout);
-#else
+void print_progress_paths_read(unsigned int current) {
     printf("\r                            ");
     printf("\rReading tiles paths...%d", current);
     fflush(stdout);
-#endif
 }
 
 void print_progress_tiles_db_write(unsigned int current) {
     printf("\r                            ");
     printf("\rWriting tiles paths to DB...%d", current);
+    fflush(stdout);
+}
+
+void print_progress_tiles_colors_db_write(unsigned char percent_done) {
+    printf("\r                            ");
+    printf("\rWriting tiles colors to db...%d%%", percent_done);
     fflush(stdout);
 }
 
@@ -87,7 +88,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-    clear_all_data(db_info);
+//    clear_all_data(db_info);
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
@@ -161,36 +162,45 @@ int main(int argc, char* argv [])
 
     free(tiles_paths);
 
-    TilesTree* const tiles_tree = init_tiles_tree();
+    if(res != TILES_ALREADY_EXISTS) {
+        TilesTree* const tiles_tree = init_tiles_tree();
 
-    GroupElement* temp_group_elem = tiles_sequence->first;
+        GroupElement* temp_group_elem = tiles_sequence->first;
 
-    for (int i = 0; temp_group_elem != NULL; ++i) {
+        for (int i = 0; temp_group_elem != NULL; ++i) {
+            printf("\r                                                ");
+            printf("\rIndexing tiles colors...%d", i);
+            fflush(stdout);
+
+            index_tile(temp_group_elem->node, tiles_tree);
+
+            temp_group_elem = temp_group_elem->next;
+        }
+
         printf("\r                                                ");
-        printf("\rIndexing tiles colors...%d", i);
+        printf("\rIndexing tiles colors...done\n");
         fflush(stdout);
 
-        index_tile(temp_group_elem->node, tiles_tree);
+        flush_tiles_colors_tree(tiles_tree, db_info, &print_progress_tiles_colors_db_write);
 
-        temp_group_elem = temp_group_elem->next;
+        printf("\r                                                ");
+        printf("\rWriting tiles colors to db...done\n");
+        fflush(stdout);
+
+        destroy_tile_color_tree(tiles_tree);
+
+        printf("\r                                                ");
+        printf("\rMaterializing count equality view...");
+        fflush(stdout);
+
+        materialize_count_equality_view(db_info);
+
+        printf("\r                                                ");
+        printf("\rMaterializing count equality view...done\n");
+        fflush(stdout);
     }
 
-    printf("\r                                                ");
-    printf("\rIndexing tiles colors...done\n");
-    fflush(stdout);
-
-    printf("\r                                                ");
-    printf("\rFlushing tiles colors to db...");
-    fflush(stdout);
-
-    flush_tiles_colors_tree(tiles_tree, db_info);
-
-    printf("\r                                                ");
-    printf("\rFlushing tiles colors to db...done\n");
-    fflush(stdout);
-
-    destroy_tile_color_tree(tiles_tree);
-
+    make_persistent_groups(db_info, tiles_sequence, total, cache_info);
 //    clusterize(tiles_sequence, total, max_diff_pixels, total / 2, cache_info, db_info);
 
     const int images_hits = cache_info->image_hit_count;

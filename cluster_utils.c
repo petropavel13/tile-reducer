@@ -1,5 +1,56 @@
 #include "cluster_utils.h"
 
+void make_persistent_groups(DbInfo* const db_info,
+                            GroupElement *const tiles_sequence,
+                            unsigned int total,
+                            CacheInfo* const cache_info) {
+    clear_working_set(db_info);
+    create_working_set(db_info);
+
+    unsigned int persistent_group_id = PERSISTENT_GROUP_NOT_DEFINED;
+
+    unsigned int next_tile_id = get_next_tile_from_working_set(db_info);
+    remove_tile_from_working_set(db_info, next_tile_id);
+    unsigned int candidate_tile_id = 0;
+
+    unsigned int* pg_ids = malloc(sizeof(unsigned int) * total);
+    unsigned int temp_count;
+
+    Tile* next_tile = NULL;
+    Tile* equal_candidate = NULL;
+
+    unsigned int diff_result = 0;
+
+    while(next_tile_id > 0) {
+        load_zero_equals_ids(db_info, next_tile_id, pg_ids, &temp_count);
+
+        for (unsigned int i = 0; i < temp_count; ++i) {
+            candidate_tile_id = pg_ids[i];
+
+            next_tile = find_tile_with_id(tiles_sequence->first, next_tile_id);
+            equal_candidate = find_tile_with_id(tiles_sequence->first, candidate_tile_id);
+
+            diff_result = calc_diff(next_tile, equal_candidate, cache_info);
+
+            if(diff_result == 0) {
+                if(persistent_group_id == PERSISTENT_GROUP_NOT_DEFINED) {
+                    persistent_group_id = create_persistent_group(db_info, next_tile_id);
+                }
+
+                add_tile_to_persistent_group(db_info, candidate_tile_id, persistent_group_id);
+
+                remove_tile_from_working_set(db_info, candidate_tile_id);
+            }
+        }
+
+        next_tile_id = get_next_tile_from_working_set(db_info);
+        remove_tile_from_working_set(db_info, next_tile_id);
+        persistent_group_id = PERSISTENT_GROUP_NOT_DEFINED;
+    }
+
+    free(pg_ids);
+}
+
 void clusterize(GroupElement* const tiles_sequence,
                 unsigned int total,
                 unsigned int max_diff_pixels,
@@ -42,7 +93,7 @@ PathPoint* make_group(GroupElement* const rest_tiles,
                       unsigned int max_diff_pixels,
                       unsigned int max_allowed_tiles,
                       unsigned int max_allowed_groups) {
-    const GroupElement* temp = get_element_with_index(rest_tiles, offset);
+    const GroupElement* temp = get_element_with_index(rest_tiles->first, offset);
 
     if(temp == NULL) {
         return parent_path;
@@ -203,6 +254,43 @@ unsigned int get_count_of_sequence(const GroupElement* const head) {
     return count;
 }
 
+GroupElement* get_element_with_index(GroupElement* const search_start_element, unsigned int index) {
+    unsigned int current = 0;
+    GroupElement* temp = search_start_element;
+
+    while ((current++ < index) && (temp != NULL)) {
+        temp = temp->next;
+    }
+
+    return temp;
+}
+
+Tile* find_tile_with_id(GroupElement* const search_start_element, unsigned int tile_id) {
+    GroupElement* temp = search_start_element;
+
+    while (temp!= NULL) {
+        if(temp->node->tile_id == tile_id) {
+            return temp->node;
+        }
+
+        temp = temp->next;
+    }
+
+    return NULL;
+}
+
+SelectedPoint* get_selected_point_for_branch(const PathPoint* branch) {
+    SelectedPoint* sp = branch->selected_point;
+
+    const PathPoint* temp = branch;
+
+    while(temp != NULL && sp == NULL) {
+        sp = temp->selected_point;
+        temp = temp->parent;
+    }
+
+    return sp;
+}
 
 char choose_best(const PathPoint* left_path, const PathPoint* right_path) {
     const SelectedPoint* lsp = get_selected_point_for_branch(left_path);

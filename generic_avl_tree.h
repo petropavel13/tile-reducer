@@ -39,6 +39,8 @@ GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo
 
 void destroy_tree(GenericNode* root_node, const TreeInfo* const tree_info);
 
+void calc_elements_count(const GenericNode* const node, unsigned long* const count);
+
 
 static inline unsigned char get_height(const GenericNode* const p)
 {

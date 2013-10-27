@@ -69,13 +69,21 @@ void destroy_tile_color_tree(TilesTree* tiles_tree) {
     destroy_tree(tiles_tree->root_node, tiles_tree->tree_info);
 }
 
-void flush_tiles_colors_tree(const TilesTree* const tiles_tree, const DbInfo* const db_info) {
+void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
+                             const DbInfo* const db_info,
+                             void (*callback)(unsigned char)) {
     if(tiles_tree->root_node != NULL) {
         drop_index_tile_color(db_info);
 
         begin_transaction(db_info);
 
-        flush_tiles_colors_node(tiles_tree->root_node, db_info);
+        unsigned long total = 0;
+        calc_elements_count(tiles_tree->root_node, &total);
+
+        unsigned long current = 0;
+        unsigned char percent = 0;
+
+        flush_tiles_colors_node(tiles_tree->root_node, db_info, &total, &current, &percent, callback);
 
         flush_buffer_tiles_colors(db_info);
 
@@ -85,12 +93,28 @@ void flush_tiles_colors_tree(const TilesTree* const tiles_tree, const DbInfo* co
     }
 }
 
-void flush_tiles_colors_node(const GenericNode* const tile_color_node, const DbInfo* const db_info) {
+void flush_tiles_colors_node(const GenericNode* const tile_color_node,
+                             const DbInfo* const db_info,
+                             const unsigned long* const total,
+                             unsigned long *const current,
+                             unsigned char *const last_percent,
+                             void (*callback)(unsigned char)) {
     if(tile_color_node != NULL) {
         const TileColor* const tile_color = tile_color_node->data;
         insert_tile_color(tile_color->tile_id, tile_color->color, tile_color->repeat_count, db_info);
 
-        flush_tiles_colors_node(tile_color_node->left, db_info);
-        flush_tiles_colors_node(tile_color_node->right, db_info);
+        if(callback != NULL) {
+            (*current)++;
+
+            const unsigned char current_percent = (*current / (*total / 100));
+
+            if(*last_percent != current_percent) {
+                callback(current_percent);
+                *last_percent = current_percent;
+            }
+        }
+
+        flush_tiles_colors_node(tile_color_node->left, db_info, total, current, last_percent, callback);
+        flush_tiles_colors_node(tile_color_node->right, db_info, total, current, last_percent, callback);
     }
 }
