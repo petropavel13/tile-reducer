@@ -75,7 +75,7 @@ void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
     if(tiles_tree->root_node != NULL) {
         drop_index_tile_color(db_info);
 
-        begin_transaction(db_info);
+//        begin_transaction(db_info);
 
         unsigned long total = 0;
         calc_elements_count(tiles_tree->root_node, &total);
@@ -87,7 +87,7 @@ void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
 
         flush_buffer_tiles_colors(db_info);
 
-        commit_transaction(db_info);
+//        commit_transaction(db_info);
 
         create_index_tile_color(db_info);
     }

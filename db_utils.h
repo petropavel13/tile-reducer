@@ -84,6 +84,8 @@ void remove_tile_from_working_set(const DbInfo* const db_info, unsigned int tile
 
 void materialize_count_equality_view(const DbInfo* const db_info);
 
+void materialize_tile_color_count(const DbInfo* const db_info);
+
 unsigned char check_is_table_exist(const DbInfo* const db_info, const char* const table_name);
 
 static inline void exec_no_result(const DbInfo* const db_info, const char * sql) {
@@ -91,11 +93,11 @@ static inline void exec_no_result(const DbInfo* const db_info, const char * sql)
 }
 
 static inline void drop_index_tile_color(const DbInfo* const db_info) {
-    exec_no_result(db_info, "DROP INDEX color_repeat_indx;");
+    exec_no_result(db_info, "DROP INDEX tile_color_color_repeat_indx;");
 }
 
 static inline void create_index_tile_color(const DbInfo* const db_info) {
-    exec_no_result(db_info, "CREATE INDEX color_repeat_indx\
+    exec_no_result(db_info, "CREATE INDEX tile_color_color_repeat_indx\
                    ON tile_color\
                    USING btree\
                    (color, repeat_count);");
@@ -228,28 +230,14 @@ static const char create_tile_color_records_count_view[] = "\
         GROUP BY tile_color.tile_id;";
 
 
+// Postgresql WITH keyword save memory and reduce execution time
 static const char create_count_equality_view[] = "\
     CREATE OR REPLACE VIEW count_equality_view AS \
-        SELECT t0.tile_id AS left_tile_id, t1.tile_id AS right_tile_id\
-        FROM tile_color_records_count_view t0\
-        JOIN tile_color_records_count_view t1 ON t0.count = t1.count\
-        WHERE t0.tile_id <> t1.tile_id;";
-
-
-static const char create_unordered_reduce_count_equality_view[] = "\
-    CREATE OR REPLACE VIEW unordered_reduce_count_equality_view AS\
-        SELECT DISTINCT \
-        CASE WHEN cev.left_tile_id < cev.right_tile_id THEN cev.left_tile_id ELSE cev.right_tile_id END AS left_tile_id,\
-        CASE WHEN cev.left_tile_id > cev.right_tile_id THEN cev.left_tile_id ELSE cev.right_tile_id END AS right_tile_id\
-        FROM count_equality_view cev;";
-
-
-static const char create_join_reduce_count_equality[] = "\
-    CREATE OR REPLACE VIEW join_reduce_count_equality AS \
-        SELECT ur0.left_tile_id, ur0.right_tile_id\
-        FROM unordered_reduce_count_equality_view ur0\
-        LEFT JOIN unordered_reduce_count_equality_view ur1 ON ur0.left_tile_id = ur1.right_tile_id\
-        WHERE ur1.left_tile_id IS NULL;";
+    WITH  tcc AS (SELECT tile_id, count FROM tile_color_count)\
+    SELECT t0.tile_id AS left_tile_id, t1.tile_id AS right_tile_id\
+    FROM tcc t0\
+    JOIN tcc t1 ON t0.count = t1.count\
+    WHERE t0.tile_id <> t1.tile_id;";
 
 
 static const char create_table_materialized_count_equality_view[] = "\
@@ -273,5 +261,40 @@ static const char create_table_materialized_count_equality_view[] = "\
         ON materialized_count_equality_view\
         USING btree\
         (right_tile_id );";
+
+static const char create_tile_color_count_table[] = "\
+    CREATE TABLE tile_color_count (\
+        tile_id integer,\
+        count integer,\
+        CONSTRAINT tile_id_fk FOREIGN KEY (tile_id)\
+            REFERENCES tiles (id) MATCH SIMPLE\
+            ON UPDATE CASCADE ON DELETE CASCADE\
+    )\
+    \
+    CREATE INDEX tile_color_count_count_indx\
+        ON tile_color_count\
+        USING btree\
+        (tile_id );\
+    \
+    CREATE INDEX tile_color_count_tile_id_indx\
+        ON tile_color_count\
+        USING btree\
+        (tile_id );";
+
+// Postgresql SELECT INTO keyword save memory and reduce execution time
+static const char materialization_sql_template[] = "\
+    DROP TABLE IF EXISTS matched_tiles;\
+    \
+    SELECT left_tile_id, right_tile_id\
+    INTO TEMP matched_tiles\
+    FROM count_equality_view\
+    WHERE left_tile_id = %d;\
+    \
+    INSERT INTO materialized_count_equality_view (SELECT left_tile_id, right_tile_id FROM matched_tiles);\
+    \
+    DELETE FROM working_set WHERE tile_id IN (SELECT right_tile_id FROM matched_tiles);\
+    DELETE FROM working_set WHERE tile_id = %d;\
+    DELETE FROM tile_color_count WHERE tile_id IN (SELECT right_tile_id FROM matched_tiles);\
+    DELETE FROM tile_color_count WHERE tile_id = %d;";
 
 #endif // DB_UTILS_H

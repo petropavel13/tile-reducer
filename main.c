@@ -49,7 +49,7 @@ int main(int argc, char* argv [])
     const unsigned short int max_diff_pixels = atoi(argv[2]);
     const size_t max_cache_size_bytes = (argc > 3) ? atoi(argv[3]) * 1024 * 1024 : DEFAULT_MB_IMAGE_CACHE_SIZE * 1024 * 1024;
 
-    printf("Tiles folder: \"%s\";\nmax_diff_pixels: %d;\ncache_size: %d MB;\n\n", path, max_diff_pixels, (int) (max_cache_size_bytes / 1024 / 1024));
+    printf("Tiles folder: \"%s\";\nmax_diff_pixels: %d;\ncache_size: %d MB;\n\n", path, max_diff_pixels, (unsigned int) (max_cache_size_bytes / 1024 / 1024));
 
     printf("Computing tiles count...");
     fflush(stdout);
@@ -59,8 +59,8 @@ int main(int argc, char* argv [])
     printf("\rTotal tiles count: %d         \n", total);
     fflush(stdout);
 
-    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
-    // PGconn* conn = PQconnectdb("dbname=tiles_db host=/tmp user=postgres password=123");
+//    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
+    PGconn* conn = PQconnectdb("dbname=tiles_db host=/var/run/postgresql user=postgres password=123");
 
     printf("Connecting to db...");
     fflush(stdout);
@@ -217,7 +217,6 @@ int main(int argc, char* argv [])
     delete_db_info(db_info);
 
     PQfinish(conn);
-//    while(1);
 
     return 0;
 }

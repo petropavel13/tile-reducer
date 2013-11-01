@@ -13,7 +13,26 @@ DbInfo* init_db_info(PGconn* conn, size_t pg_sql_buffer_size) {
 }
 
 void materialize_count_equality_view(const DbInfo* const db_info) {
-    PQclear(PQexec(db_info->conn, "INSERT INTO materialized_join_reduce_equality_view (SELECT left_tile_id, right_tile_id FROM join_reduce_count_equality);"));
+    clear_working_set(db_info);
+    create_working_set(db_info);
+
+    materialize_tile_color_count(db_info);
+
+    char sql[strlen(materialization_sql_template) - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN];
+
+    unsigned int temp_tile_id = get_next_tile_from_working_set(db_info);
+
+    while (temp_tile_id != 0) {
+        sprintf(sql, materialization_sql_template, temp_tile_id, temp_tile_id, temp_tile_id);
+
+        exec_no_result(db_info, sql);
+
+        temp_tile_id = get_next_tile_from_working_set(db_info);
+    }
+}
+
+void materialize_tile_color_count(const DbInfo* const db_info) {
+    exec_no_result(db_info, "INSERT INTO tile_color_count (SELECT tile_id, count FROM tile_color_records_count_view);");
 }
 
 unsigned char check_is_table_exist(const DbInfo* const db_info, const char* const table_name) {
@@ -65,10 +84,15 @@ void create_tables_if_not_exists(const DbInfo* const db_info) {
         exec_no_result(db_info, create_table_materialized_count_equality_view);
     }
 
+    if(check_is_table_exist(db_info,"tile_color_count") == TABLE_DOESNT_EXIST) {
+        exec_no_result(db_info, create_tile_color_count_table);
+    }
+
+
     exec_no_result(db_info, create_tile_color_records_count_view);
     exec_no_result(db_info, create_count_equality_view);
-    exec_no_result(db_info, create_unordered_reduce_count_equality_view);
-    exec_no_result(db_info, create_join_reduce_count_equality);
+//    exec_no_result(db_info, create_unordered_reduce_count_equality_view);
+//    exec_no_result(db_info, create_join_reduce_count_equality);
 }
 
 void clear_all_data(const DbInfo* const db_info) {
