@@ -91,8 +91,6 @@ void create_tables_if_not_exists(const DbInfo* const db_info) {
 
     exec_no_result(db_info, create_tile_color_records_count_view);
     exec_no_result(db_info, create_count_equality_view);
-//    exec_no_result(db_info, create_unordered_reduce_count_equality_view);
-//    exec_no_result(db_info, create_join_reduce_count_equality);
 }
 
 void clear_all_data(const DbInfo* const db_info) {
@@ -105,13 +103,11 @@ void clear_session_data(const DbInfo* const db_info) {
     exec_no_result(db_info, restart_session_sequences);
 }
 
-void write_tiles_paths_to_pg(const DbInfo* const db_info,
-                             char **const paths,
-                             unsigned int total_count,
-                             unsigned int *const ids_in_pg,
-                             void (*callback) (unsigned int)) {
-    begin_transaction(db_info);
-
+void write_tiles_paths(const DbInfo* const db_info,
+                                    char **const paths,
+                                    unsigned int total_count,
+                                    unsigned int *const ids_in_pg,
+                                    void (*callback) (unsigned int)) {
     PGresult *res;
 
     const char sql_template_insert[] = "INSERT INTO tiles (tile_path) VALUES('%s')";
@@ -204,8 +200,6 @@ void write_tiles_paths_to_pg(const DbInfo* const db_info,
 
         PQclear(res);
     }
-
-    commit_transaction(db_info);
 }
 
 void read_tiles_ids(const DbInfo *const db_info, unsigned int* const ids_in_pg) {
@@ -317,7 +311,7 @@ void load_zero_equals_ids(const DbInfo* const db_info,
                           unsigned int tile_id,
                           unsigned int* ids_in_pg,
                           unsigned int* count) {
-    const char sql_template[] = "SELECT right_tile_id FROM materialized_count_equality_view WHERE right_tile_id IN (SELECT tile_id FROM working_set) AND left_tile_id = %d;";
+    const char sql_template[] = "SELECT right_tile_id FROM materialized_count_equality_view WHERE left_tile_id = %d;";
 
     char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 
@@ -332,7 +326,7 @@ void load_zero_equals_ids(const DbInfo* const db_info,
     }
 }
 
-unsigned int create_persistent_group(const DbInfo* const db_info, unsigned int leader_tile_id) {
+unsigned int create_persistent_group(const DbInfo* const db_info, const unsigned int leader_tile_id) {
     const char sql_template[] = "INSERT INTO persistent_groups(leader_tile_id) VALUES (%d) RETURNING id";
 
     char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
@@ -349,14 +343,40 @@ unsigned int create_persistent_group(const DbInfo* const db_info, unsigned int l
 }
 
 void add_tile_to_persistent_group(const DbInfo* const db_info,
-                                 unsigned int tile_id,
-                                 unsigned int persistent_group_id) {
+                                const unsigned int tile_id,
+                                const unsigned int persistent_group_id) {
     const char sql_template_fill_group[] = "INSERT INTO persistent_group_tile (group_id, tile_id) VALUES(%d, %d)";
 
     char sql[strlen(sql_template_fill_group) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 
     sprintf(sql, sql_template_fill_group, persistent_group_id, tile_id);
-    PQclear(PQexec(db_info->conn, sql));
+    exec_no_result(db_info, sql);
+}
+
+void add_tile_to_persistent_group_using_buffer(const DbInfo* const db_info,
+                                        const unsigned int tile_id,
+                                        const unsigned int persistent_group_id) {
+    if(get_buffer_status(db_info, 0) == BUFFER_EMPTY) {
+        const size_t sql_insert_max_size = strlen(sql_template_insert_persistent_group_tile) - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN;
+
+        char sql[sql_insert_max_size];
+        sprintf(sql, sql_template_insert_persistent_group_tile, persistent_group_id, tile_id);
+
+        add_to_buffer(db_info, sql, 0);
+    } else {
+        const size_t sql_values_max_size = strlen(sql_template_values_persistent_group_tile) - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN;
+
+        if(get_buffer_status(db_info, sql_values_max_size) == BUFFER_FULL) {
+            flush_db_buffer(db_info);
+
+            add_tile_to_persistent_group_using_buffer(db_info, tile_id, persistent_group_id); // recursion
+        } else {
+            char sql[sql_values_max_size];
+            sprintf(sql, sql_template_values_persistent_group_tile, persistent_group_id, tile_id);
+
+            add_to_buffer(db_info, sql, db_info->db_buffer->current_offset);
+        }
+    }
 }
 
 void delete_db_info(DbInfo* db_info) {
@@ -365,71 +385,69 @@ void delete_db_info(DbInfo* db_info) {
     free(db_info);
 }
 
-void insert_tile_color(const unsigned int tile_id,
-                       const unsigned int color,
-                       const unsigned int repeat_count,
-                       const DbInfo* const db_info) {
+void add_to_buffer(const DbInfo* const db_info, const char * const sql, const size_t offset) {
+    const size_t len = strlen(sql);
+    strncpy(db_info->db_buffer->buffer_str + offset, sql, len);
 
+    db_info->db_buffer->current_offset += len;
+}
+
+unsigned char get_buffer_status(const DbInfo* const db_info, const size_t chars_to_insert) {
     if(db_info->db_buffer->current_offset == 0) {
-        const size_t insert_max_len = strlen(sql_template_insert_tile_color) + 8 * 3;
+        return BUFFER_EMPTY;
+    } else if(db_info->db_buffer->current_offset + chars_to_insert >= db_info->db_buffer->max_buffer_size) {
+        return BUFFER_FULL;
+    }
 
-        char sql[insert_max_len];
+    return BUFFER_OK;
+}
 
+void insert_tile_color_using_buffer(const unsigned int tile_id,
+                                    const unsigned int color,
+                                    const unsigned int repeat_count,
+                                    const DbInfo* const db_info) {
+
+    if(get_buffer_status(db_info, 0) == BUFFER_EMPTY) {
+        const size_t sql_insert_max_size = strlen(sql_template_insert_tile_color) - STRING_TEMPLATE_SIZE * 3 + MAX_UINT32_STR_LEN * 3;
+
+        char sql[sql_insert_max_size];
         sprintf(sql, sql_template_insert_tile_color, tile_id, color, repeat_count);
-        const size_t insert_len = strlen(sql);
-        strncpy(db_info->db_buffer->buffer_str, sql, insert_len);
 
-        db_info->db_buffer->current_offset += insert_len;
+        add_to_buffer(db_info, sql, 0);
     } else {
-        const size_t values_max_len = strlen(sql_template_values_tile_color) + 8 * 3;
+        const size_t sql_values_max_size = strlen(sql_template_values_tile_color) - STRING_TEMPLATE_SIZE * 3 + MAX_UINT32_STR_LEN * 3;
 
-        if(db_info->db_buffer->current_offset + values_max_len >= db_info->db_buffer->max_buffer_size - 1) {
-            flush_buffer_tiles_colors(db_info);
+        if(get_buffer_status(db_info, sql_values_max_size) == BUFFER_FULL) {
+            flush_db_buffer(db_info);
 
-            const size_t insert_max_len = strlen(sql_template_insert_tile_color) + 8 * 3;
-
-            char sql[insert_max_len];
-
-            sprintf(sql, sql_template_insert_tile_color, tile_id, color, repeat_count);
-
-            const size_t insert_len = strlen(sql);
-            strncpy(db_info->db_buffer->buffer_str, sql, insert_len);
-
-            db_info->db_buffer->current_offset = insert_len;
+            insert_tile_color_using_buffer(tile_id, color, repeat_count, db_info); // recursion
         } else {
-            char sql[values_max_len];
-
+            char sql[sql_values_max_size];
             sprintf(sql, sql_template_values_tile_color, tile_id, color, repeat_count);
-            const size_t values_len = strlen(sql);
-            strncpy(db_info->db_buffer->buffer_str + db_info->db_buffer->current_offset, sql, values_len);
 
-            db_info->db_buffer->current_offset += values_len;
+            add_to_buffer(db_info, sql, db_info->db_buffer->current_offset);
         }
     }
 }
 
-void flush_buffer_tiles_colors(const DbInfo* const db_info) {
+void flush_db_buffer(const DbInfo* const db_info) {
     if(db_info->db_buffer->current_offset == 0)
         return;
 
     db_info->db_buffer->buffer_str[db_info->db_buffer->current_offset] = ';';
     db_info->db_buffer->buffer_str[db_info->db_buffer->current_offset + 1] = '\0';
 
-    PQclear(PQexec(db_info->conn, db_info->db_buffer->buffer_str));
+    exec_no_result(db_info, db_info->db_buffer->buffer_str);
 
     db_info->db_buffer->current_offset = 0;
 }
 
 void create_working_set(const DbInfo* const db_info) {
-    PQclear(PQexec(db_info->conn, "INSERT INTO working_set(tile_id) SELECT id FROM tiles;"));
+    exec_no_result(db_info, "INSERT INTO working_set(tile_id) SELECT id FROM tiles;");
 }
 
 void create_working_set_wo_persistent_records(const DbInfo* const db_info) {
-    PQclear(PQexec(db_info->conn, "INSERT INTO working_set(tile_id) (SELECT id FROM tiles WHERE id NOT IN (SELECT tile_id FROM persistent_group_tile));"));
-}
-
-void clear_working_set(const DbInfo* const db_info) {
-    PQclear(PQexec(db_info->conn, "TRUNCATE working_set;"));
+    exec_no_result(db_info, "INSERT INTO working_set(tile_id) (SELECT id FROM tiles WHERE id NOT IN (SELECT tile_id FROM persistent_group_tile));");
 }
 
 unsigned int get_next_tile_from_working_set(const DbInfo* const db_info) {
@@ -452,5 +470,14 @@ void remove_tile_from_working_set(const DbInfo* const db_info, unsigned int tile
     char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 
     sprintf(sql, sql_template, tile_id);
-    PQclear(PQexec(db_info->conn, sql));
+    exec_no_result(db_info, sql);
+}
+
+void remove_tiles_from_working_set_via_zero_equals(const DbInfo* const db_info, const unsigned int left_tile_id) {
+    const char sql_template[] = "DELETE FROM working_set WHERE tile_id IN (SELECT right_tile_id FROM materialized_count_equality_view WHERE left_tile_id = %d);";
+
+    char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
+
+    sprintf(sql, sql_template, left_tile_id);
+    exec_no_result(db_info, sql);
 }

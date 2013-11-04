@@ -75,8 +75,6 @@ void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
     if(tiles_tree->root_node != NULL) {
         drop_index_tile_color(db_info);
 
-//        begin_transaction(db_info);
-
         unsigned long total = 0;
         calc_elements_count(tiles_tree->root_node, &total);
 
@@ -85,9 +83,7 @@ void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
 
         flush_tiles_colors_node(tiles_tree->root_node, db_info, &total, &current, &percent, callback);
 
-        flush_buffer_tiles_colors(db_info);
-
-//        commit_transaction(db_info);
+        flush_db_buffer(db_info);
 
         create_index_tile_color(db_info);
     }
@@ -101,7 +97,7 @@ void flush_tiles_colors_node(const GenericNode* const tile_color_node,
                              void (*callback)(unsigned char)) {
     if(tile_color_node != NULL) {
         const TileColor* const tile_color = tile_color_node->data;
-        insert_tile_color(tile_color->tile_id, tile_color->color, tile_color->repeat_count, db_info);
+        insert_tile_color_using_buffer(tile_color->tile_id, tile_color->color, tile_color->repeat_count, db_info);
 
         if(callback != NULL) {
             (*current)++;

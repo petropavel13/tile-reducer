@@ -52,7 +52,7 @@ unsigned char get_tile_data(unsigned int tile_id,
     }
 }
 
-unsigned char get_diff(unsigned long key,
+unsigned char get_diff_from_cache(unsigned long key,
                        CacheInfo *cache_info,
                        unsigned short* const diff_pixels) {
     GenericNode* const current_edge_root = cache_info->edges_root_node;

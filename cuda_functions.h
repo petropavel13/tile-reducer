@@ -1,6 +1,8 @@
 #ifndef CUDA_FUNCTIONS_H
 #define CUDA_FUNCTIONS_H
 
+#define USHORT_MAX 65535
+
 __device__ inline unsigned int index_in_3d(unsigned int x,
                                         unsigned int x_size,
                                         unsigned int y,
@@ -12,9 +14,7 @@ __device__ inline unsigned int index_in_3d(unsigned int x,
 extern __host__ __device__ int abs(int) __THROW;
 
 
-__global__ void sub_one_cube_with_others(unsigned short int left_offset_start,
-                                        unsigned char* left_cubes,
-                                        size_t left_cube_size_pitch,
+__global__ void sub_one_cube_with_others(unsigned char* left_cube,
                                         unsigned char* right_cubes,
                                         size_t right_cube_size_pitch,
                                         unsigned char* diff_cubes,

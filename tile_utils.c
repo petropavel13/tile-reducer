@@ -49,9 +49,11 @@ unsigned int get_total_files_count(const char* path) {
 }
 
 void read_tiles_paths(const char* path,
-                      char** paths,
-                      unsigned int* current,
-                      void (*callback)(unsigned int)) {
+                      char** const paths,
+                      const unsigned int *const total,
+                      unsigned int *const current,
+                      unsigned char *const last_percent,
+                      void (*callback)(unsigned char)) {
     DIR* dir = NULL;
     struct dirent *entry;
 
@@ -64,7 +66,7 @@ void read_tiles_paths(const char* path,
                 char inner_path[strlen(path) + strlen(entry->d_name) + 1 + 1];
                 sprintf(inner_path, "%s%s/", path, entry->d_name);
 
-                read_tiles_paths(inner_path, paths, current, callback);
+                read_tiles_paths(inner_path, paths, total, current, last_percent, callback);
             } else {
                 char* inner_path = malloc(sizeof(char) * (strlen(path) + strlen(entry->d_name) + 1));
                 sprintf(inner_path, "%s%s", path, entry->d_name);
@@ -72,7 +74,12 @@ void read_tiles_paths(const char* path,
                 paths[(*current)++] = inner_path;
 
                 if(callback != NULL) {
-                    callback(*current);
+                    const unsigned char current_percent = (*current / (*total / 100));
+
+                    if(*last_percent != current_percent) {
+                        callback(current_percent);
+                        *last_percent = current_percent;
+                    }
                 }
             }
         }
@@ -86,38 +93,33 @@ void delete_tile_file(TileFile* tile_file) {
     free(tile_file);
 }
 
-unsigned int calc_diff(const Tile* const left_node, const Tile* const right_node, CacheInfo* const cache_info) {
-    unsigned char* left_tile_pixels = NULL;
-
+void load_pixels(const Tile* const tile,
+                 CacheInfo* const cache_info,
+                 unsigned char **pixels) {
     unsigned int cache_res;
 
-    cache_res = get_tile_data(left_node->tile_id, cache_info, &left_tile_pixels);
+    cache_res = get_tile_data(tile->tile_id, cache_info, pixels);
 
     if(cache_res == CACHE_MISS) {
-        unsigned int read_res = get_tile_pixels(left_node->tile_file, &left_tile_pixels);
+        unsigned int read_res = get_tile_pixels(tile->tile_file, pixels);
 
-        if(read_res != 0) {
-            printf("\n\nproblem while loading tile with id: %d\n\n", right_node->tile_id);
-            fflush(stdout);
+        if(read_res == 0) {
+            push_image_to_cache(tile->tile_id, *pixels, cache_info);
         } else {
-            push_image_to_cache(left_node->tile_id, left_tile_pixels, cache_info);
+            printf("\n\nproblem while loading tile with id: %d\n\n", tile->tile_id);
+            fflush(stdout);
         }
     }
+}
+
+unsigned int calc_diff(const Tile* const left_node,
+                       const Tile* const right_node,
+                       CacheInfo* const cache_info) {
+    unsigned char* left_tile_pixels = NULL;
+    load_pixels(left_node, cache_info, &left_tile_pixels);
 
     unsigned char* right_tile_pixels = NULL;
-
-    cache_res = get_tile_data(right_node->tile_id, cache_info, &right_tile_pixels);
-
-    if(cache_res == CACHE_MISS) {
-        unsigned int read_res = get_tile_pixels(right_node->tile_file, &right_tile_pixels);
-
-        if(read_res != 0) {
-            printf("\n\nproblem while loading tile with id: %d\n\n", right_node->tile_id);
-            fflush(stdout);
-        } else {
-            push_image_to_cache(right_node->tile_id, right_tile_pixels, cache_info);
-        }
-    }
+    load_pixels(right_node, cache_info, &right_tile_pixels);
 
     unsigned short diff_result;
 
@@ -127,9 +129,61 @@ unsigned int calc_diff(const Tile* const left_node, const Tile* const right_node
         printf("\n\nGPU TASK FAILED\n\n");
         fflush(stdout);
 
-        return -1;
+        return USHORT_MAX;
     }
 
     return diff_result;
 }
 
+void calc_diff_one_with_many(const Tile* const left_tile,
+                             const Tile **const right_tiles,
+                             const unsigned int right_tiles_count,
+                             CacheInfo* const cache_info,
+                             unsigned short int * const results) {
+    unsigned char* left_tile_pixels = NULL;
+    load_pixels(left_tile, cache_info, &left_tile_pixels);
+
+    unsigned int rest_count = right_tiles_count;
+    unsigned int current = 0;
+
+    unsigned char* right_tiles_pixels = (unsigned char*)malloc(TILE_SIZE_BYTES * TILE_SIZE_BUFFER);
+
+    unsigned char* temp_right_tile_pixels = NULL;
+
+    unsigned int compare_res = 0;
+
+    while (rest_count > TILE_SIZE_BUFFER) {
+        for (unsigned int i = 0; i < TILE_SIZE_BUFFER; ++i) {
+            load_pixels(right_tiles[current + i], cache_info, &temp_right_tile_pixels);
+            memcpy(&right_tiles_pixels[i * TILE_SIZE_BYTES], temp_right_tile_pixels, TILE_SIZE_BYTES);
+        }
+
+        compare_res = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, TILE_SIZE_BUFFER, &results[current]);
+
+        if(compare_res == TASK_FAILED) {
+            printf("\n\nGPU TASK FAILED\n\n");
+            fflush(stdout);
+
+            return;
+        }
+
+        rest_count -= TILE_SIZE_BUFFER;
+        current += TILE_SIZE_BUFFER;
+    }
+
+    for (unsigned int i = 0; i < rest_count; ++i) {
+        load_pixels(right_tiles[current + i], cache_info, &temp_right_tile_pixels);
+        memcpy(&right_tiles_pixels[i * TILE_SIZE_BYTES], temp_right_tile_pixels, TILE_SIZE_BYTES);
+    }
+
+    compare_res = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, rest_count, &results[current]);
+
+    if(compare_res == TASK_FAILED) {
+        printf("\n\nGPU TASK FAILED\n\n");
+        fflush(stdout);
+
+        return;
+    }
+
+    free(right_tiles_pixels);
+}

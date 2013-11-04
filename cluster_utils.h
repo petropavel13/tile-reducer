@@ -29,7 +29,7 @@ typedef struct SelectedPoint {
 #define PERSISTENT_GROUP_NOT_DEFINED 0
 
 void make_persistent_groups(DbInfo* const db_info,
-                            GroupElement *const tiles_sequence,
+                            GenericNode *const tiles_root_node,
                             unsigned int total, CacheInfo *const cache_info);
 
 void clusterize(GroupElement *const tiles_sequence,
@@ -55,7 +55,7 @@ unsigned int get_count_of_sequence(const GroupElement *const head);
 
 GroupElement* get_element_with_index(GroupElement *const search_start_element, unsigned int index);
 
-Tile* find_tile_with_id(GroupElement *const search_start_element, unsigned int tile_id);
+GroupElement *find_tile_with_id(GroupElement *const search_start_element, unsigned int tile_id);
 
 SelectedPoint* get_selected_point_for_branch(const PathPoint* branch);
 

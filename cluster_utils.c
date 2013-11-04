@@ -1,7 +1,7 @@
 #include "cluster_utils.h"
 
 void make_persistent_groups(DbInfo* const db_info,
-                            GroupElement *const tiles_sequence,
+                            GenericNode *const tiles_root_node,
                             unsigned int total,
                             CacheInfo* const cache_info) {
     clear_working_set(db_info);
@@ -11,44 +11,68 @@ void make_persistent_groups(DbInfo* const db_info,
 
     unsigned int next_tile_id = get_next_tile_from_working_set(db_info);
     remove_tile_from_working_set(db_info, next_tile_id);
-    unsigned int candidate_tile_id = 0;
 
     unsigned int* pg_ids = malloc(sizeof(unsigned int) * total);
     unsigned int temp_count;
 
     Tile* next_tile = NULL;
-    Tile* equal_candidate = NULL;
+    const Tile** const equal_candidates = malloc(sizeof(Tile*) * total); // prevent many malloc/free calls
+
+    unsigned int candidate_tile_id = 0;
+
+    unsigned short int* const results = malloc(sizeof(unsigned short int) * total); // prevent many malloc/free calls
 
     unsigned int diff_result = 0;
 
     while(next_tile_id > 0) {
+        printf("current: %d\n", next_tile_id);
+        fflush(stdout);
+        next_tile = (Tile*) find(tiles_root_node, next_tile_id)->data;
         load_zero_equals_ids(db_info, next_tile_id, pg_ids, &temp_count);
 
-        for (unsigned int i = 0; i < temp_count; ++i) {
-            candidate_tile_id = pg_ids[i];
+        if(temp_count > 1) {
+            for (unsigned int i = 0; i < temp_count; ++i) {
+                equal_candidates[i] = (Tile*) find(tiles_root_node, pg_ids[i])->data;
+            }
 
-            next_tile = find_tile_with_id(tiles_sequence->first, next_tile_id);
-            equal_candidate = find_tile_with_id(tiles_sequence->first, candidate_tile_id);
+            calc_diff_one_with_many(next_tile, equal_candidates, temp_count, cache_info, results);
 
-            diff_result = calc_diff(next_tile, equal_candidate, cache_info);
+            for (unsigned int i = 0; i < temp_count; ++i) {
+                diff_result = results[i];
+                candidate_tile_id = pg_ids[i];
+
+                if(diff_result == 0) {
+                    if(persistent_group_id == PERSISTENT_GROUP_NOT_DEFINED) {
+                        persistent_group_id = create_persistent_group(db_info, next_tile_id);
+                    }
+
+                    add_tile_to_persistent_group_using_buffer(db_info, candidate_tile_id, persistent_group_id);
+                }
+            }
+
+            flush_db_buffer(db_info);
+        } else if(temp_count == 1) {
+            equal_candidates[0] = (Tile*) find(tiles_root_node, pg_ids[0])->data;
+            diff_result = calc_diff(next_tile, equal_candidates[0], cache_info);
 
             if(diff_result == 0) {
-                if(persistent_group_id == PERSISTENT_GROUP_NOT_DEFINED) {
-                    persistent_group_id = create_persistent_group(db_info, next_tile_id);
-                }
+                candidate_tile_id = pg_ids[0];
 
+                persistent_group_id = create_persistent_group(db_info, next_tile_id);
                 add_tile_to_persistent_group(db_info, candidate_tile_id, persistent_group_id);
-
-                remove_tile_from_working_set(db_info, candidate_tile_id);
             }
         }
 
-        next_tile_id = get_next_tile_from_working_set(db_info);
+        remove_tiles_from_working_set_via_zero_equals(db_info, next_tile_id);
         remove_tile_from_working_set(db_info, next_tile_id);
+
+        next_tile_id = get_next_tile_from_working_set(db_info);
         persistent_group_id = PERSISTENT_GROUP_NOT_DEFINED;
     }
 
     free(pg_ids);
+    free(equal_candidates);
+    free(results);
 }
 
 void clusterize(GroupElement* const tiles_sequence,
@@ -136,7 +160,7 @@ PathPoint* make_group(GroupElement* const rest_tiles,
 
         key = make_key(leader_tile->tile_id, temp->node->tile_id);
 
-        res = get_diff(key, cache_info, &diff);
+        res = get_diff_from_cache(key, cache_info, &diff);
 
         if(res == CACHE_HIT) {
             //
@@ -265,12 +289,12 @@ GroupElement* get_element_with_index(GroupElement* const search_start_element, u
     return temp;
 }
 
-Tile* find_tile_with_id(GroupElement* const search_start_element, unsigned int tile_id) {
+GroupElement* find_tile_with_id(GroupElement* const search_start_element, unsigned int tile_id) {
     GroupElement* temp = search_start_element;
 
     while (temp!= NULL) {
         if(temp->node->tile_id == tile_id) {
-            return temp->node;
+            return temp;
         }
 
         temp = temp->next;

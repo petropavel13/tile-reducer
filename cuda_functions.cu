@@ -1,8 +1,6 @@
 #include "cuda_functions.h"
 
-__global__ void sub_one_cube_with_others(unsigned short int left_offset_start,
-                                        unsigned char* left_cubes,
-                                        size_t left_cube_size_pitch,
+__global__ void sub_one_cube_with_others(unsigned char* left_cube,
                                         unsigned char* right_cubes,
                                         size_t right_cube_size_pitch,
                                         unsigned char* diff_cubes,
@@ -22,11 +20,9 @@ __global__ void sub_one_cube_with_others(unsigned short int left_offset_start,
 
     const unsigned int index = index_in_3d(x, x_size, y, z, z_size);
 
-    const unsigned int left_offset = left_cube_size_pitch * left_offset_start;
     const unsigned int right_offset = right_cube_size_pitch * cube_number;
     const unsigned int diff_offset = diff_cube_size_pitch * cube_number;
 
-    unsigned char* left_cube = (unsigned char*) ((char*)left_cubes + left_offset);
     unsigned char* right_cube = (unsigned char*) ((char*)right_cubes + right_offset);
     unsigned char* diff_cube = (unsigned char*) ((char*)diff_cubes + diff_offset);
     
@@ -59,13 +55,11 @@ __global__ void sum_z_dimension_zero_or_one(unsigned char* cubes,
 
     unsigned short result = 0;
 
-    // temp = cube[index_in_3d(x, x_size, y, 0, z_size)]
+    const unsigned int temp_index = index_in_3d(x, x_size, y, 0, z_size);
 
-    for (int i = 0; i < z_size; ++i)
+    for (unsigned short int i = 0; i < z_size; ++i)
     {
-        // result += cube[temp + i];
-        // profile profit !
-        result += cube[index_in_3d(x, x_size, y, i, z_size)];
+        result += cube[temp_index + i];
     }
 
     matrix[index_in_matrix] = 1 * (result > 0);
@@ -98,7 +92,7 @@ __global__ void sum_y_dimension(unsigned char* matrices,
 
     __syncthreads();
 
-    for(unsigned int s = row_count / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
+    for(unsigned short int s = row_count / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
     {
         if(row_number < s)
         {
@@ -132,17 +126,15 @@ __global__ void sum_x_dimension(unsigned short int* vectors,
 
     __syncthreads();
 
-//    unsigned int overhead_check;
+    unsigned int overhead_check;
 
-    for(unsigned int s = column_count / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
+    for(unsigned short int s = column_count / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
     {
         if(column_number < s)
         {
-//            prevent ushort overflow
-//            profile me!
-//            overhead_check = temp_results[column_number] + temp_results[column_number + s];
-//            temp_results[column_number] += overhead_check - (1 * (overhead_check >= 65535));
-            temp_results[column_number] += temp_results[column_number + s] - (1 * ((temp_results[column_number] + temp_results[column_number + s]) >= 65535));
+            // prevent ushort overflow
+            overhead_check = temp_results[column_number] + temp_results[column_number + s];
+            temp_results[column_number] = USHORT_MAX * (overhead_check >= USHORT_MAX) + overhead_check * (overhead_check < USHORT_MAX);
         }
 
         __syncthreads();
@@ -151,12 +143,6 @@ __global__ void sum_x_dimension(unsigned short int* vectors,
     if(column_number == 0)
         results[vector_number] = temp_results[0];
 }
-
-
-
-
-
-
 
 
 
@@ -187,7 +173,7 @@ __global__ void sum_z_dimension_one_cude(unsigned char* cube,
 
     const unsigned int temp_index = index_in_3d(x, 256, y, 0, 4);
 
-    for (int i = 0; i < 4; ++i)
+    for (unsigned short int i = 0; i < 4; ++i)
     {
         result += cube[temp_index + i];
     }
@@ -208,7 +194,7 @@ __global__ void sum_y_dimension_one_matrix(unsigned char* matrix,
 
     __syncthreads();
 
-    for(unsigned int s = 256 / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
+    for(unsigned short int s = 256 / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
     {
         if(row_number < s)
         {
@@ -234,12 +220,13 @@ __global__ void sum_x_dimension_one_vector(unsigned short int* vector,
 
     unsigned int overhead_check;
 
-    for(unsigned int s = 256 / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
+    for(unsigned short int s = 256 / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
     {
         if(column_number < s)
         {
+            // prevent ushort overflow
             overhead_check = temp_results[column_number] + temp_results[column_number + s];
-            temp_results[column_number] += overhead_check - (1 * (overhead_check >= 65535));
+            temp_results[column_number] = USHORT_MAX * (overhead_check >= USHORT_MAX) + overhead_check * (overhead_check < USHORT_MAX);
         }
 
         __syncthreads();

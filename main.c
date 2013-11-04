@@ -16,9 +16,9 @@
 
 //#define DEBUG 1
 
-void print_progress_paths_read(unsigned int current) {
+void print_progress_paths_read(const unsigned char percent_done) {
     printf("\r                            ");
-    printf("\rReading tiles paths...%d", current);
+    printf("\rReading tiles paths...%d%%", percent_done);
     fflush(stdout);
 }
 
@@ -28,7 +28,7 @@ void print_progress_tiles_db_write(unsigned int current) {
     fflush(stdout);
 }
 
-void print_progress_tiles_colors_db_write(unsigned char percent_done) {
+void print_progress_tiles_colors_db_write(const unsigned char percent_done) {
     printf("\r                            ");
     printf("\rWriting tiles colors to db...%d%%", percent_done);
     fflush(stdout);
@@ -47,7 +47,7 @@ int main(int argc, char* argv [])
 
     const char* path = argv[1];
     const unsigned short int max_diff_pixels = atoi(argv[2]);
-    const size_t max_cache_size_bytes = (argc > 3) ? atoi(argv[3]) * 1024 * 1024 : DEFAULT_MB_IMAGE_CACHE_SIZE * 1024 * 1024;
+    const size_t max_cache_size_bytes = (argc > 3) ? ((size_t) atoi(argv[3])) * 1024 * 1024 : ((size_t) DEFAULT_MB_IMAGE_CACHE_SIZE) * 1024 * 1024;
 
     printf("Tiles folder: \"%s\";\nmax_diff_pixels: %d;\ncache_size: %d MB;\n\n", path, max_diff_pixels, (unsigned int) (max_cache_size_bytes / 1024 / 1024));
 
@@ -60,7 +60,8 @@ int main(int argc, char* argv [])
     fflush(stdout);
 
 //    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
-    PGconn* conn = PQconnectdb("dbname=tiles_db host=/var/run/postgresql user=postgres password=123");
+    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=123");
+//    PGconn* conn = PQconnectdb("dbname=tiles_db host=/var/run/postgresql user=postgres password=123");
 
     printf("Connecting to db...");
     fflush(stdout);
@@ -71,16 +72,17 @@ int main(int argc, char* argv [])
         return 1;
     }
 
-    DbInfo* db_info = init_db_info(conn, 1024 * 1024 * DEFAULT_MB_PG_SQL_BUFFER_SIZE);
+    DbInfo* const db_info = init_db_info(conn, 1024 * 1024 * DEFAULT_MB_PG_SQL_BUFFER_SIZE);
 
     printf("done\n");
     fflush(stdout);
 
     unsigned int zero = 0;
+    unsigned char percent = 0;
 
-    char** tiles_paths = malloc(sizeof(char*) * total);
+    char** const tiles_paths = malloc(sizeof(char*) * total);
 
-    read_tiles_paths(path, tiles_paths, &zero, &print_progress_paths_read);
+    read_tiles_paths(path, tiles_paths, &total, &zero, &percent, &print_progress_paths_read);
 
     printf("\r                                                ");
     printf("\rReading tiles paths...done\n");
@@ -101,7 +103,8 @@ int main(int argc, char* argv [])
 
         read_tiles_ids(db_info, pg_ids);
     } else if(res == NO_TILES_IN_DB) {
-        write_tiles_paths_to_pg(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        clear_all_data(db_info); // reset sequences
+        write_tiles_paths(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
         printf("\rWriting tiles paths to DB...done\n");
@@ -111,7 +114,7 @@ int main(int argc, char* argv [])
         fflush(stdout);
 
         clear_all_data(db_info);
-        write_tiles_paths_to_pg(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        write_tiles_paths(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
         printf("\rWriting tiles paths to DB...done\n");
@@ -120,6 +123,10 @@ int main(int argc, char* argv [])
 
     CacheInfo* const cache_info = init_cache(max_cache_size_bytes, DEFAULT_MB_DIFF_CACHE_SIZE * 1024 * 1024, TILE_SIZE_BYTES);
 
+    TreeInfo* tree_info = (TreeInfo*)malloc(sizeof(TreeInfo));
+    tree_info->data_destructor = NULL;
+    GenericNode* root_node = NULL;
+
     GroupElement* tiles_sequence = malloc(sizeof(GroupElement));
     tiles_sequence->first = tiles_sequence;
 
@@ -127,15 +134,20 @@ int main(int argc, char* argv [])
 
     Tile* temp_tile = NULL;
 
+    unsigned int current = 0;
+    unsigned char last_percent = 0;
+
     for (unsigned int i = 0; i < total; ++i)
     {
-        printf("\r                                                ");
-        printf("\rLoading tiles into RAM...%d", i);
-        fflush(stdout);
-
         temp_tile = malloc(sizeof(Tile));
         temp_tile->tile_id = pg_ids[i];
         temp_tile->tile_file = read_tile(tiles_paths[i]);
+
+        if(root_node != NULL) {
+            root_node = insert(root_node, temp_tile->tile_id, temp_tile);
+        } else {
+            root_node = create_node(temp_tile->tile_id, temp_tile);
+        }
 
         tiles_sequence->node = temp_tile;
         tiles_sequence->next = malloc(sizeof(GroupElement));
@@ -144,6 +156,15 @@ int main(int argc, char* argv [])
         prev = tiles_sequence;
 
         tiles_sequence = tiles_sequence->next;
+
+        const unsigned char current_percent = (++current / (total / 100));
+
+        if(last_percent != current_percent) {
+            printf("\r                                                ");
+            printf("\rLoading tiles into RAM...%d%%", current_percent);
+            fflush(stdout);
+            last_percent = current_percent;
+        }
     }
 
     prev->next = NULL;
@@ -200,8 +221,11 @@ int main(int argc, char* argv [])
         fflush(stdout);
     }
 
-    make_persistent_groups(db_info, tiles_sequence, total, cache_info);
+    make_persistent_groups(db_info, root_node, total, cache_info);
 //    clusterize(tiles_sequence, total, max_diff_pixels, total / 2, cache_info, db_info);
+
+    destroy_tree(root_node, tree_info);
+    free(tree_info);
 
     const int images_hits = cache_info->image_hit_count;
     const int images_misses = cache_info->image_miss_count;

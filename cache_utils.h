@@ -37,7 +37,7 @@ unsigned char get_tile_data(unsigned int tile_id,
                             CacheInfo *const cache_info,
                             unsigned char **const tile_data);
 
-unsigned char get_diff(unsigned long key,
+unsigned char get_diff_from_cache(unsigned long key,
                        CacheInfo *cache_info,
                        unsigned short *const diff_pixels);
 
