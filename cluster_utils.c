@@ -1,13 +1,14 @@
 #include "cluster_utils.h"
 
-void make_persistent_groups(DbInfo* const db_info,
+void make_persistent_groups(const DbInfo *const db_info,
                             GenericNode *const tiles_root_node,
-                            unsigned int total,
-                            CacheInfo* const cache_info) {
+                            const unsigned int total,
+                            CacheInfo* const cache_info,
+                            void (*callback)(unsigned int, unsigned int)) {
     clear_working_set(db_info);
     create_working_set(db_info);
 
-    unsigned int persistent_group_id = PERSISTENT_GROUP_NOT_DEFINED;
+    unsigned int persistent_group_id = GROUP_ID_NOT_DEFINED;
 
     unsigned int next_tile_id = get_next_tile_from_working_set(db_info);
     remove_tile_from_working_set(db_info, next_tile_id);
@@ -16,7 +17,7 @@ void make_persistent_groups(DbInfo* const db_info,
     unsigned int temp_count;
 
     Tile* next_tile = NULL;
-    const Tile** const equal_candidates = malloc(sizeof(Tile*) * total); // prevent many malloc/free calls
+    const Tile** const equal_candidates = (const Tile**)malloc(sizeof(Tile*) * total); // prevent many malloc/free calls
 
     unsigned int candidate_tile_id = 0;
 
@@ -24,11 +25,15 @@ void make_persistent_groups(DbInfo* const db_info,
 
     unsigned int diff_result = 0;
 
+    unsigned int rest_count = total;
+
     while(next_tile_id > 0) {
-        printf("current: %d\n", next_tile_id);
-        fflush(stdout);
         next_tile = (Tile*) find(tiles_root_node, next_tile_id)->data;
         load_zero_equals_ids(db_info, next_tile_id, pg_ids, &temp_count);
+
+        if(callback != NULL) {
+            callback(rest_count, temp_count);
+        }
 
         if(temp_count > 1) {
             for (unsigned int i = 0; i < temp_count; ++i) {
@@ -42,7 +47,7 @@ void make_persistent_groups(DbInfo* const db_info,
                 candidate_tile_id = pg_ids[i];
 
                 if(diff_result == 0) {
-                    if(persistent_group_id == PERSISTENT_GROUP_NOT_DEFINED) {
+                    if(persistent_group_id == GROUP_ID_NOT_DEFINED) {
                         persistent_group_id = create_persistent_group(db_info, next_tile_id);
                     }
 
@@ -51,7 +56,7 @@ void make_persistent_groups(DbInfo* const db_info,
             }
 
             flush_db_buffer(db_info);
-        } else if(temp_count == 1) {
+        } else if(temp_count == 1) { // comparet 1 to 1 (use simpler functions)
             equal_candidates[0] = (Tile*) find(tiles_root_node, pg_ids[0])->data;
             diff_result = calc_diff(next_tile, equal_candidates[0], cache_info);
 
@@ -63,11 +68,13 @@ void make_persistent_groups(DbInfo* const db_info,
             }
         }
 
-        remove_tiles_from_working_set_via_zero_equals(db_info, next_tile_id);
+        rest_count -= (temp_count + 1);
+
         remove_tile_from_working_set(db_info, next_tile_id);
+        remove_tiles_from_working_set_via_zero_equals(db_info, next_tile_id);
 
         next_tile_id = get_next_tile_from_working_set(db_info);
-        persistent_group_id = PERSISTENT_GROUP_NOT_DEFINED;
+        persistent_group_id = GROUP_ID_NOT_DEFINED;
     }
 
     free(pg_ids);
@@ -75,259 +82,688 @@ void make_persistent_groups(DbInfo* const db_info,
     free(results);
 }
 
-void clusterize(GroupElement* const tiles_sequence,
-                unsigned int total,
-                unsigned int max_diff_pixels,
-                unsigned int max_allowed_tiles,
-                CacheInfo *const cache_info,
-                DbInfo* const db_info) {
-    SelectedPoint* const root_selected_point = malloc(sizeof(SelectedPoint));
-    root_selected_point->groups_count = 0;
-    root_selected_point->group_id = 0;
-    root_selected_point->leader_node = tiles_sequence->first->node;
-    root_selected_point->rest_count = total;
-    root_selected_point->sequence_head = tiles_sequence->first;
+void migrate_tile(GenericNode** from, GenericNode** to, const unsigned int tile_id) {
+    TreeInfo* const tree_info = (TreeInfo*)malloc(sizeof(TreeInfo));
+    tree_info->data_destructor = NULL;
 
-    PathPoint* const root_path = malloc(sizeof(PathPoint));
-    root_path->parent = NULL;
-    root_path->child_left = NULL;
-    root_path->child_right = NULL;
-    root_path->selected_point = root_selected_point;
+    *to = insert(*to, tile_id, find(*from, tile_id)->data);
+    *from = remove_node(*from, tile_id, tree_info);
 
-    PathPoint* left_path = make_group(tiles_sequence, total, 1, root_path, cache_info, db_info, max_diff_pixels, max_allowed_tiles, 1);
-    PathPoint* right_path = make_group(tiles_sequence, total, 0, root_path, cache_info, db_info, max_diff_pixels, max_allowed_tiles, 1);
-
-    const char best_select = choose_best(left_path, right_path);
-
-    if(best_select == -1) {
-        delete_path(right_path, db_info);
-    } else if(best_select == 1) {
-        delete_path(left_path, db_info);
-    } else if(best_select == 0) {
-        delete_path(left_path, db_info); // or right
-    }
+    free(tree_info);
 }
 
-PathPoint* make_group(GroupElement* const rest_tiles,
-                      unsigned int total,
-                      unsigned int offset,
-                      PathPoint *const parent_path,
-                      CacheInfo *const cache_info,
-                      DbInfo* const db_info,
-                      unsigned int max_diff_pixels,
-                      unsigned int max_allowed_tiles,
-                      unsigned int max_allowed_groups) {
-    const GroupElement* temp = get_element_with_index(rest_tiles->first, offset);
+void delete_tile_groups_sequence(TileGroupsSequence* const sequence) {
+    if(sequence == NULL)
+        return;
 
-    if(temp == NULL) {
-        return parent_path;
+    delete_tile_groups_sequence(sequence->next);
+    sequence->next = NULL;
+
+    if(sequence->item != NULL) {
+        free(sequence->item);
+        sequence->item = NULL;
     }
 
-    const SelectedPoint* const parent_sp = get_selected_point_for_branch(parent_path);
+    free(sequence);
+}
 
-    if((total - (parent_sp->groups_count + parent_sp->rest_count)) > max_allowed_tiles) {
-        return parent_path;
+void delete_binded_tiles_sequence(BindedTilesSequence* const sequence) {
+    if(sequence == NULL)
+        return;
+
+    delete_binded_tiles_sequence(sequence->next);
+    sequence->next = NULL;
+
+    if(sequence->item != NULL) {
+        free(sequence->item);
+        sequence->item = NULL;
     }
 
-    PathPoint* const child_left = malloc(sizeof(PathPoint));
-    child_left->parent = parent_path;
-    child_left->child_left = NULL;
-    child_left->child_right = NULL;
-    child_left->selected_point = NULL;
+    free(sequence);
+}
 
+void delete_result_slot(ResultSlot slot) {
+    delete_tile_groups_sequence(slot.tg_seq);
+    delete_binded_tiles_sequence(slot.bt_seq);
 
-    PathPoint* left_path = make_group(rest_tiles, total, ++offset, child_left, cache_info, db_info, max_diff_pixels, max_allowed_tiles, max_allowed_groups);
+    slot.is_empty = 1;
+}
 
+void clusterize(GenericNode* const all_tiles,
+                const unsigned int all_tiles_count,
+                const unsigned int max_diff_pixels,
+                const DbInfo* const db_info,
+                CacheInfo* const cache_info) {
+    materialize_tile_color_count_wo_persistent(db_info);
 
-    GroupElement* current_rest = malloc(sizeof(GroupElement));
-    current_rest->first = current_rest;
-    GroupElement* current_rest_prev = NULL;
+    clear_working_set(db_info);
+    create_working_set_wo_persistent_records_w_max_diff(db_info, max_diff_pixels);
 
-    Tile* const leader_tile = temp->node;
+    unsigned int working_set_count = 0;
+    unsigned int* const working_set_ids = (unsigned int*)malloc(sizeof(unsigned int) * all_tiles_count);
 
-    const unsigned int group_id = create_virtual_group(db_info/*, leader_tile->tile_id, leader_tile->tile_id*/);
+    read_working_set_tiles_ids(db_info, working_set_ids, &working_set_count);
 
-    unsigned short int diff;
+    GenericNode* free_tiles = create_tiles_tree_from_tiles_ids(all_tiles, working_set_ids, working_set_count);
 
-    unsigned char res;
+    free(working_set_ids);
 
-    unsigned int current_rest_count = 0;
+    GenericNode* used_tiles = create_node(0, NULL); // dummy
 
-    unsigned long key;
+    unsigned int* persistent_groups_ids = NULL;
+    unsigned int* persistent_groups_leaders_ids = NULL;
+    unsigned int persistent_groups_count = 0;
 
-    while ((temp = temp->next) != NULL) {
-        diff = 0;
+    read_persistent_groups(db_info, &persistent_groups_ids, &persistent_groups_leaders_ids, &persistent_groups_count);
 
-        key = make_key(leader_tile->tile_id, temp->node->tile_id);
+    TileGroupsSequence* const tile_group_sequence = create_tiles_groups_sequence_from_ids(all_tiles, persistent_groups_ids, persistent_groups_leaders_ids,persistent_groups_count);
 
-        res = get_diff_from_cache(key, cache_info, &diff);
+    BindedTilesSequence* const binded_tiles_sequence = (BindedTilesSequence*)malloc(sizeof(BindedTilesSequence));
+    binded_tiles_sequence->item = NULL;
+    binded_tiles_sequence->next = NULL;
 
-        if(res == CACHE_HIT) {
-            //
-        } else if(res == CACHE_MISS) {
-            diff = calc_diff(leader_tile, temp->node, cache_info);
-            push_edge_to_cache(key, diff, cache_info);
-        }
+    TilesSequence* t_tiles_sequence_from_free = (TilesSequence*)malloc(sizeof(TilesSequence));
+    t_tiles_sequence_from_free->tile = NULL;
+    t_tiles_sequence_from_free->next = NULL;
 
-        if(diff <= max_diff_pixels) {
-            add_tile_to_group(db_info, group_id, temp->node->tile_id);
+    TilesSequence* t_last = make_tile_sequence_from_tree(free_tiles, t_tiles_sequence_from_free);
+
+    TilesSequence* t_tiles_sequence = t_tiles_sequence_from_free;
+
+    TreeInfo* const tree_info_sequence = (TreeInfo*)malloc(sizeof(TreeInfo));
+    tree_info_sequence->data_destructor = &tile_sequence_destructor;
+
+    TreeInfo* tree_info_tile = (TreeInfo*)malloc(sizeof(TreeInfo));
+    tree_info_tile->data_destructor = NULL;
+
+    GenericNode* related_tiles = create_node(0, NULL); // dummy
+
+    unsigned int* const related_ids = (unsigned int*)malloc(sizeof(unsigned int) * working_set_count);
+
+    unsigned int related_count = 0;
+
+    TilesSequence* t_related_sequence = NULL;
+
+    while (t_tiles_sequence != NULL && t_tiles_sequence != t_last) {
+        read_related_tiles_ids(db_info, t_tiles_sequence->tile->tile_id, related_ids, &related_count, max_diff_pixels);
+
+        t_related_sequence = create_tiles_sequence_from_tile_ids(free_tiles, related_ids, related_count);
+
+        if(t_related_sequence == NULL) {
+            working_set_count--;
+            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, tree_info_tile);
         } else {
-            current_rest->node = temp->node;
-
-            current_rest->next = malloc(sizeof(GroupElement));
-            current_rest->next->first = current_rest->first;
-
-            current_rest_prev = current_rest;
-
-            current_rest = current_rest->next;
-
-            current_rest_count++;
+            clean_related_group(t_tiles_sequence->tile, &t_related_sequence, related_count, max_diff_pixels, cache_info);
+            related_tiles = insert(related_tiles, t_tiles_sequence->tile->tile_id, t_related_sequence);
         }
+
+        t_tiles_sequence = t_tiles_sequence->next;
     }
 
-    SelectedPoint* const right_selected_point = malloc(sizeof(SelectedPoint));
-    right_selected_point->groups_count = parent_sp->groups_count + 1;
-    right_selected_point->group_id = group_id;
-    right_selected_point->leader_node = leader_tile;
+    related_tiles = remove_node(related_tiles, 0, tree_info_sequence); // remove dummy
+
+    delete_tiles_sequence(t_tiles_sequence_from_free);
+
+    t_tiles_sequence_from_free = (TilesSequence*)malloc(sizeof(TilesSequence));
+    t_tiles_sequence_from_free->tile = NULL;
+    t_tiles_sequence_from_free->next = NULL;
+
+    t_last = make_tile_sequence_from_tree(free_tiles, t_tiles_sequence_from_free);
+
+    t_tiles_sequence = t_tiles_sequence_from_free;
+
+    while (t_tiles_sequence != NULL && t_tiles_sequence != t_last) {
+        t_related_sequence = (TilesSequence*) find(related_tiles, t_tiles_sequence->tile->tile_id)->data;
+
+        if(t_related_sequence == NULL) {
+            working_set_count--;
+            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, tree_info_tile);
+            related_tiles = remove_node(related_tiles, t_tiles_sequence->tile->tile_id, tree_info_sequence);
+        }
+
+        t_tiles_sequence = t_tiles_sequence->next;
+    }
+
+    unsigned long f_count = 0;
+    calc_elements_count(free_tiles, &f_count);
+
+    free(related_ids);
+
+    const NodeResult best_result = calc_node_result(tile_group_sequence,
+                                                    persistent_groups_count,
+                                                    binded_tiles_sequence,
+                                                    &used_tiles,
+                                                    &free_tiles,
+                                                    working_set_count,
+                                                    (Tile*) free_tiles->data,
+                                                    related_tiles,
+                                                    max_diff_pixels,
+                                                    cache_info);
 
 
-    if(current_rest_count == 0) {
-        free(current_rest);
+    delete_tile_groups_sequence(tile_group_sequence);
+    delete_binded_tiles_sequence(binded_tiles_sequence);
 
-        right_selected_point->rest_count = parent_sp->rest_count - 1;
-        right_selected_point->sequence_head = NULL;
+    destroy_tree(free_tiles, tree_info_sequence);
+    destroy_tree(used_tiles, tree_info_sequence);
+    destroy_tree(related_tiles, tree_info_sequence);
 
+    free(tree_info_sequence);
+
+    delete_tiles_sequence(t_tiles_sequence_from_free);
+}
+
+void clean_related_group(const Tile* const tile,
+                         TilesSequence** related_sequence_for_tile,
+                         const unsigned int related_sequence_count,
+                         const unsigned short int max_diff_pixels,
+                         CacheInfo* const cache_info) {
+    if(related_sequence_count > 1) {
+        Tile** const related_tiles_for_tile = (Tile**)malloc(sizeof(Tile*) * related_sequence_count);
+
+        TilesSequence* t_related_tile = *related_sequence_for_tile;
+
+        for (unsigned int i = 0; i < related_sequence_count; ++i) {
+            related_tiles_for_tile[i] = t_related_tile->tile;
+            t_related_tile = t_related_tile->next;
+        }
+
+        unsigned short int* const diff_results = (unsigned short int*)malloc(sizeof(unsigned short int) * related_sequence_count);
+
+        calc_diff_one_with_many(tile, related_tiles_for_tile, related_sequence_count, cache_info, diff_results);
+
+
+        TilesSequence* new_sequence_first = (TilesSequence*)malloc(sizeof(TilesSequence));
+        TilesSequence* new_sequence = new_sequence_first;
+        TilesSequence* pre = NULL;
+
+        unsigned int hit_count = 0;
+
+        for (unsigned int i = 0; i < related_sequence_count; ++i) {
+            if(diff_results[i] <= max_diff_pixels) {
+                hit_count++;
+
+                new_sequence->tile = related_tiles_for_tile[i];
+                new_sequence->next = (TilesSequence*)malloc(sizeof(TilesSequence));
+                pre = new_sequence;
+                new_sequence = new_sequence->next;
+                printf("pass %u - %u (%u)\n", tile->tile_id, related_tiles_for_tile[i]->tile_id, diff_results[i]);
+                fflush(stdout);
+            }
+        }
+
+        if(hit_count == 0) {
+            free(new_sequence_first);
+            delete_tiles_sequence(*related_sequence_for_tile);
+            (*related_sequence_for_tile) = NULL;
+        } else if(hit_count < related_sequence_count)  {
+            free(new_sequence);
+            pre->next = NULL;
+            delete_tiles_sequence(*related_sequence_for_tile);
+            (*related_sequence_for_tile) = new_sequence_first;
+        } else { // ==
+            new_sequence->next = NULL;
+            delete_tiles_sequence(new_sequence_first);
+        }
+
+        free(related_tiles_for_tile);
+        free(diff_results);
+    } else if(related_sequence_count == 1) {
+        const unsigned short t_compare_result = calc_diff(tile, (*related_sequence_for_tile)->tile, cache_info);
+
+        if(t_compare_result > max_diff_pixels) {
+            delete_tiles_sequence(*related_sequence_for_tile);
+            (*related_sequence_for_tile) = NULL;
+        } else {
+            printf("pass %u - %u (%u)\n", tile->tile_id, (*related_sequence_for_tile)->tile->tile_id, t_compare_result);
+            fflush(stdout);
+        }
+    }
+}
+
+NodeResult calc_node_result(TileGroupsSequence* groups_sequence,
+                            const unsigned int groups_count,
+                            BindedTilesSequence* binded_tiles_sequence,
+                            GenericNode **used_tiles,
+                            GenericNode **not_used,
+                            const unsigned int unused_tiles_count,
+                            Tile* const tile,
+                            GenericNode* const related_tiles,
+                            const unsigned int max_diff_pixels,
+                            CacheInfo* const cache_info) {
+    migrate_tile(not_used, used_tiles, tile->tile_id);
+
+    TilesSequence* related_tiles_sequence = (TilesSequence*) find(related_tiles, tile->tile_id)->data;
+
+    ResultSlot left_slot;
+
+    const NodeResult left_node_result = calc_left_node_result(groups_sequence,
+                                                              groups_count,
+                                                              used_tiles,
+                                                              not_used,
+                                                              binded_tiles_sequence,
+                                                              unused_tiles_count,
+                                                              tile,
+                                                              related_tiles,
+                                                              related_tiles_sequence,
+                                                              max_diff_pixels,
+                                                              cache_info);
+
+    left_slot.tg_seq = groups_sequence->next;
+    groups_sequence->next = NULL;
+
+    left_slot.bt_seq = binded_tiles_sequence->next;
+    binded_tiles_sequence->next = NULL;
+
+    ResultSlot right_slot;
+    groups_sequence->next = (TileGroupsSequence*)malloc(sizeof(TileGroupsSequence));
+    groups_sequence->next->first = groups_sequence->first;
+    groups_sequence->next->item = (TileGroup*)malloc(sizeof(TileGroup));
+    groups_sequence->next->item->group_id = GROUP_ID_NOT_DEFINED;
+    groups_sequence->next->item->leader_tile = tile;
+    groups_sequence->next->next = NULL;
+
+    const NodeResult right_node_result = calc_node_result_group_selected(groups_sequence->next,
+                                                                         groups_count + 1,
+                                                                         binded_tiles_sequence,
+                                                                         used_tiles,
+                                                                         not_used,
+                                                                         unused_tiles_count - 1,
+                                                                         related_tiles,
+                                                                         related_tiles_sequence,
+                                                                         max_diff_pixels,
+                                                                         cache_info);
+
+    right_slot.bt_seq = binded_tiles_sequence->next;
+    binded_tiles_sequence->next = NULL;
+
+    right_slot.tg_seq = groups_sequence->next;
+    groups_sequence->next = NULL;
+
+    const char best_result = choose_best_result(left_node_result, right_node_result);
+
+    NodeResult best_node_result;
+
+    if(best_result == LEFT_BEST) {
+        printf("g:%u ut:%u better than g:%u ut:%u\n",
+               left_node_result.created_groups_count,
+               left_node_result.rest_tiles_count,
+               right_node_result.created_groups_count,
+               right_node_result.rest_tiles_count);
+        fflush(stdout);
+        delete_result_slot(right_slot);
+
+        binded_tiles_sequence->next = left_slot.bt_seq;
+        groups_sequence->next = left_slot.tg_seq;
+
+        best_node_result = left_node_result;
+    } else if(best_result == RIGHT_BEST || best_result == EQUAL) {
+        printf("g:%u ut:%u better than g:%u ut:%u\n",
+               right_node_result.created_groups_count,
+               right_node_result.rest_tiles_count,
+               left_node_result.created_groups_count,
+               left_node_result.rest_tiles_count);
+        fflush(stdout);
+        delete_result_slot(left_slot);
+
+        binded_tiles_sequence->next = right_slot.bt_seq;
+        groups_sequence->next = right_slot.tg_seq;
+
+        best_node_result = right_node_result;
+    }
+
+    migrate_tile(used_tiles, not_used, tile->tile_id);
+
+    return best_node_result;
+}
+
+
+NodeResult calc_left_node_result(TileGroupsSequence* groups_sequence,
+                                 const unsigned int groups_count,
+                                 GenericNode **used_tiles,
+                                 GenericNode **not_used,
+                                 BindedTilesSequence *binded_tiles_sequence,
+                                 const unsigned int unused_tiles_count,
+                                 Tile *const tile,
+                                 GenericNode* const related_tiles,
+                                 TilesSequence * related_tiles_sequence,
+                                 const unsigned int max_diff_pixels,
+                                 CacheInfo* const cache_info) {
+    ResultSlot used_slot;
+    used_slot.bt_seq = NULL;
+    used_slot.tg_seq = NULL;
+    used_slot.is_empty = 1;
+
+    if(groups_sequence == NULL) { // no groups
     } else {
-        free(current_rest);
-        current_rest_prev->next = NULL;
-        current_rest = current_rest_prev;
+        TileGroupsSequence* t_group_sequence = groups_sequence->first;
 
-        right_selected_point->rest_count = parent_sp->rest_count - (get_count_of_sequence(rest_tiles) - offset - current_rest_count) - 1;
-        right_selected_point->sequence_head = current_rest;
-    }
+        unsigned short int t_diff_result = USHORT_MAX;
+
+        ResultSlot empty_slot;
+        empty_slot.bt_seq = NULL;
+        empty_slot.tg_seq = NULL;
+        empty_slot.is_empty = 1;
+
+        ResultSlot t_slot;
+
+        char t_best_result = EQUAL;
+
+        while (t_group_sequence != NULL) {
+            t_diff_result = calc_diff(tile, t_group_sequence->item->leader_tile, cache_info);
+
+            if(t_diff_result <= max_diff_pixels) {
+                binded_tiles_sequence->next = (BindedTilesSequence*)malloc(sizeof(BindedTilesSequence));
+                binded_tiles_sequence->next->item = (BindedTile*)malloc(sizeof(BindedTile));
+                binded_tiles_sequence->next->item->group = t_group_sequence->item;
+                binded_tiles_sequence->next->item->tile = tile;
+                binded_tiles_sequence->next->next = NULL;
 
 
-    PathPoint* child_right = malloc(sizeof(PathPoint));
-    child_right->parent = parent_path;
-    child_right->child_left = NULL;
-    child_right->child_right = NULL;
-    child_right->selected_point = right_selected_point;
+                empty_slot.node_result = calc_node_result_group_selected(groups_sequence,
+                                                                         groups_count,
+                                                                         binded_tiles_sequence->next,
+                                                                         used_tiles,
+                                                                         not_used,
+                                                                         unused_tiles_count - 1,
+                                                                         related_tiles,
+                                                                         related_tiles_sequence,
+                                                                         max_diff_pixels,
+                                                                         cache_info);
 
 
-    PathPoint* right_path = child_right;
+                empty_slot.tg_seq = groups_sequence->next;
+                groups_sequence->next = NULL;
 
-    if(right_selected_point->groups_count <= max_allowed_groups) {
-        right_path = make_group(current_rest, total, 0, child_right, cache_info, db_info, max_diff_pixels, max_allowed_tiles, max_allowed_groups);
-    }
+                empty_slot.bt_seq = binded_tiles_sequence->next;
+                binded_tiles_sequence->next = NULL;
 
-    const char best_select = choose_best(left_path, right_path);
+                empty_slot.is_empty = 0;
 
-    if(best_select == -1) {
-        delete_path(right_path, db_info);
+                if(!used_slot.is_empty) {
+                    t_best_result = choose_best_result(empty_slot.node_result, used_slot.node_result);
 
-        parent_path->child_left = child_left;
+                    if(t_best_result == LEFT_BEST) {
+                        printf("g:%u ut:%u better than g:%u ut:%u\n",
+                               empty_slot.node_result.created_groups_count,
+                               empty_slot.node_result.rest_tiles_count,
+                               used_slot.node_result.created_groups_count,
+                               used_slot.node_result.rest_tiles_count);
+                        fflush(stdout);
+                        delete_result_slot(used_slot);
 
-        return left_path;
-    } else if(best_select == 1) {
-        delete_path(left_path, db_info);
+                        t_slot = used_slot;
+                        used_slot = empty_slot;
+                        empty_slot = t_slot;
+                    } else if(t_best_result == RIGHT_BEST || t_best_result == EQUAL) {
+                        printf("g:%u ut:%u better than g:%u ut:%u\n",
+                               used_slot.node_result.created_groups_count,
+                               used_slot.node_result.rest_tiles_count,
+                               empty_slot.node_result.created_groups_count,
+                               empty_slot.node_result.rest_tiles_count);
+                        fflush(stdout);
+                        delete_result_slot(empty_slot);
+                    }
+                } else {
+                    t_slot = used_slot;
+                    used_slot = empty_slot;
+                    empty_slot = t_slot;
+                }
+            }
 
-        parent_path->child_right = child_right;
-
-        return right_path;
-    } else if(best_select == 0) {
-        delete_path(left_path, db_info); // or right
-
-        parent_path->child_right = child_right;
-
-        return right_path;
-    }
-
-    return NULL; // impossible
-}
-
-void delete_path(PathPoint* point, DbInfo* const db_info) {
-    if(point->selected_point != NULL) {
-        GroupElement* sequence_head = point->selected_point->sequence_head == NULL ? NULL : point->selected_point->sequence_head->first;
-        GroupElement* prev = NULL;
-
-        while (sequence_head != NULL) {
-            prev = sequence_head;
-            sequence_head = sequence_head->next;
-            free(prev);
+            t_group_sequence = t_group_sequence->next;
         }
-
-        delete_group(db_info, point->selected_point->group_id);
-
-        free(point->selected_point);
     }
 
-    free(point);
+    if(!used_slot.is_empty) {
+        groups_sequence->next = used_slot.tg_seq;
+        binded_tiles_sequence->next = used_slot.bt_seq;
+
+        return used_slot.node_result;
+    } else {
+        NodeResult result;
+        result.created_groups_count = groups_count;
+        result.rest_tiles_count = unused_tiles_count;
+        return result;
+    }
 }
 
-unsigned int get_count_of_sequence(const GroupElement* const head) {
-    unsigned int count = 0;
 
-    const GroupElement* temp = head->first;
-
-    while (temp != NULL) {
-        count++;
-
-        temp = temp->next;
+NodeResult calc_node_result_group_selected(TileGroupsSequence* groups_sequence,
+                                           const unsigned int groups_count,
+                                           BindedTilesSequence* binded_tiles_sequence,
+                                           GenericNode** used_tiles,
+                                           GenericNode** not_used,
+                                           const unsigned int unused_tiles_count,
+                                           GenericNode* const related_tiles,
+                                           TilesSequence* related_tiles_sequence,
+                                           const unsigned int max_diff_pixels,
+                                           CacheInfo* const cache_info) {
+    if(unused_tiles_count < 1) {
+        NodeResult result;
+        result.created_groups_count = groups_count;
+        result.rest_tiles_count = unused_tiles_count;
+        return result;
     }
 
-    return count;
-}
+    ResultSlot used_slot;
+    used_slot.bt_seq = NULL;
+    used_slot.tg_seq = NULL;
+    used_slot.is_empty = 1;
 
-GroupElement* get_element_with_index(GroupElement* const search_start_element, unsigned int index) {
-    unsigned int current = 0;
-    GroupElement* temp = search_start_element;
+    if(related_tiles_sequence == NULL) { // no related
+    } else {
+        TilesSequence* t_related_tile_sequence = related_tiles_sequence;
 
-    while ((current++ < index) && (temp != NULL)) {
-        temp = temp->next;
-    }
+        ResultSlot empty_slot;
+        empty_slot.bt_seq = NULL;
+        empty_slot.tg_seq = NULL;
+        empty_slot.is_empty = 1;
 
-    return temp;
-}
 
-GroupElement* find_tile_with_id(GroupElement* const search_start_element, unsigned int tile_id) {
-    GroupElement* temp = search_start_element;
+        ResultSlot t_slot;
 
-    while (temp!= NULL) {
-        if(temp->node->tile_id == tile_id) {
-            return temp;
+        char t_best_result = EQUAL;
+
+        while(t_related_tile_sequence != NULL) {
+            if (find(*used_tiles, t_related_tile_sequence->tile->tile_id) != NULL) { // tile already used
+            } else {
+                empty_slot.node_result = calc_node_result(groups_sequence,
+                                                          groups_count,
+                                                          binded_tiles_sequence,
+                                                          used_tiles,
+                                                          not_used,
+                                                          unused_tiles_count,
+                                                          t_related_tile_sequence->tile,
+                                                          related_tiles,
+                                                          max_diff_pixels,
+                                                          cache_info);
+
+                empty_slot.tg_seq = groups_sequence->next;
+                groups_sequence->next = NULL;
+
+                empty_slot.bt_seq = binded_tiles_sequence->next;
+                binded_tiles_sequence->next = NULL;
+
+                empty_slot.is_empty = 0;
+
+                if(!used_slot.is_empty) {
+                    t_best_result = choose_best_result(empty_slot.node_result, used_slot.node_result);
+
+                    if(t_best_result == LEFT_BEST) {
+                        printf("g:%u ut:%u better than g:%u ut:%u\n",
+                               empty_slot.node_result.created_groups_count,
+                               empty_slot.node_result.rest_tiles_count,
+                               used_slot.node_result.created_groups_count,
+                               used_slot.node_result.rest_tiles_count);
+                        fflush(stdout);
+                        delete_result_slot(used_slot);
+
+                        t_slot = used_slot;
+                        used_slot = empty_slot;
+                        empty_slot = t_slot;
+                    } else if(t_best_result == RIGHT_BEST || t_best_result == EQUAL) {
+                        printf("g:%u ut:%u better than g:%u ut:%u\n",
+                               used_slot.node_result.created_groups_count,
+                               used_slot.node_result.rest_tiles_count,
+                               empty_slot.node_result.created_groups_count,
+                               empty_slot.node_result.rest_tiles_count);
+                        fflush(stdout);
+                        delete_result_slot(empty_slot);
+                    }
+                } else {
+                    t_slot = used_slot;
+                    used_slot = empty_slot;
+                    empty_slot = t_slot;
+                }
+            }
+
+            t_related_tile_sequence = t_related_tile_sequence->next;
         }
-
-        temp = temp->next;
     }
 
-    return NULL;
+
+    if(used_slot.is_empty) {
+        return calc_node_result(groups_sequence,
+                                groups_count,
+                                binded_tiles_sequence,
+                                used_tiles,
+                                not_used,
+                                unused_tiles_count,
+                                (Tile*)(*not_used)->data,
+                                related_tiles,
+                                max_diff_pixels,
+                                cache_info);
+    } else {
+        groups_sequence->next = used_slot.tg_seq;
+        binded_tiles_sequence->next = used_slot.bt_seq;
+
+        return used_slot.node_result;
+    }
 }
 
-SelectedPoint* get_selected_point_for_branch(const PathPoint* branch) {
-    SelectedPoint* sp = branch->selected_point;
-
-    const PathPoint* temp = branch;
-
-    while(temp != NULL && sp == NULL) {
-        sp = temp->selected_point;
-        temp = temp->parent;
+TilesSequence* make_tile_sequence_from_tree(const GenericNode* const node, TilesSequence* const sequence) {
+    if(node == NULL) {
+        sequence->tile = NULL;
+        sequence->next = NULL;
+        return sequence;
     }
 
-    return sp;
+    TilesSequence* const last_elem = make_tile_sequence_from_tree(node->left, sequence);
+
+    last_elem->tile = (Tile*)node->data;
+    last_elem->next = (TilesSequence*)malloc(sizeof(TilesSequence));
+
+    return make_tile_sequence_from_tree(node->right, last_elem->next);
 }
 
-char choose_best(const PathPoint* left_path, const PathPoint* right_path) {
-    const SelectedPoint* lsp = get_selected_point_for_branch(left_path);
-    const SelectedPoint* rsp = get_selected_point_for_branch(right_path);
+void delete_tiles_sequence(TilesSequence* const tile_sequence) {
+    if(tile_sequence == NULL)
+        return;
 
-#ifdef DEBUG
-    if(left_selected_point == NULL || right_selected_point == NULL) {
-        printf("\n\n --Can't compare Paths-- \n\n");
+    delete_tiles_sequence(tile_sequence->next);
+
+    free(tile_sequence);
+}
+
+void tile_sequence_destructor(void* data) {
+    delete_tiles_sequence((TilesSequence*)data);
+}
+
+GenericNode* create_tiles_tree_from_tiles_ids(GenericNode* const all_tiles,
+                                              const unsigned int* const ids,
+                                              const unsigned int count) {
+    if(count < 1) {
+        return NULL;
     }
-#endif
 
-    const unsigned int l_rating = lsp->groups_count + lsp->rest_count;
-    const unsigned int r_rating = rsp->groups_count + rsp->rest_count;
+    GenericNode* root = create_node(ids[0], find(all_tiles, ids[0])->data);
 
-    return (-1) * (l_rating < r_rating) + 1 * (l_rating > r_rating);
+    for (unsigned int i = 1; i < count; ++i) {
+        root = insert(root, ids[i], find(all_tiles, ids[i])->data);
+    }
+
+    return root;
+}
+
+TilesSequence* create_tiles_sequence_from_tile_ids(GenericNode* const tiles,
+                                                   const unsigned int* const ids,
+                                                   const unsigned int count) {
+
+    if(count < 1) {
+        return NULL;
+    }
+
+    TilesSequence* const first = (TilesSequence*)malloc(sizeof(TilesSequence));
+
+    first->tile = (Tile*) find(tiles, ids[0])->data;
+
+    if(count == 1) {
+        first->next = NULL;
+        return first;
+    }
+
+    TilesSequence* t_next = (TilesSequence*)malloc(sizeof(TilesSequence));
+    t_next->tile = (Tile*) find(tiles, ids[1])->data;
+
+    first->next = t_next;
+
+    for (unsigned int i = 2; i < count; ++i) {
+        t_next->next = (TilesSequence*)malloc(sizeof(TilesSequence));
+        t_next = t_next->next;
+        t_next->tile = (Tile*)find(tiles, ids[i])->data;
+    }
+
+    t_next->next = NULL;
+
+    return first;
+}
+
+TileGroupsSequence* create_tiles_groups_sequence_from_ids(GenericNode* const all_tiles,
+                                                          const unsigned int* const groups_ids,
+                                                          const unsigned int* const leader_tiles_ids,
+                                                          const unsigned int count) {
+    if(count < 1) {
+        return NULL;
+    }
+
+    TileGroupsSequence* const first = (TileGroupsSequence*)malloc(sizeof(TileGroupsSequence));
+    first->first = first;
+
+    first->item = (TileGroup*)malloc(sizeof(TileGroup));
+    first->item->group_id = groups_ids[0];
+    first->item->leader_tile = (Tile*) find(all_tiles, leader_tiles_ids[0])->data;
+
+    if(count == 1) {
+        first->next = NULL;
+        return first;
+    }
+
+    TileGroupsSequence* t_next = (TileGroupsSequence*)malloc(sizeof(TileGroupsSequence));
+    t_next->first = first;
+    t_next->item = (TileGroup*)malloc(sizeof(TileGroup));;
+    t_next->item->group_id = groups_ids[1];
+    t_next->item->leader_tile = (Tile*) find(all_tiles, leader_tiles_ids[1])->data;
+
+    first->next = t_next;
+
+    for (unsigned int i = 2; i < count; ++i) {
+        t_next->next = (TileGroupsSequence*)malloc(sizeof(TileGroupsSequence));
+        t_next = t_next->next;
+
+        t_next->item->group_id = groups_ids[1];
+        t_next->item->leader_tile = (Tile*) find(all_tiles, leader_tiles_ids[1])->data;
+        t_next->first = first;
+    }
+
+    t_next->next = NULL;
+
+    return first;
+}
+
+char choose_best_result(const NodeResult left_node_result, const NodeResult right_node_result) {
+    const unsigned int l_rating = left_node_result.created_groups_count + left_node_result.rest_tiles_count;
+    const unsigned int r_rating = right_node_result.created_groups_count + right_node_result.rest_tiles_count;
+
+    return (LEFT_BEST) * (l_rating < r_rating) + (RIGHT_BEST) * (l_rating > r_rating); // -1 | 0 | 1
 }

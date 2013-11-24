@@ -3,7 +3,6 @@
 
 #include "tile_utils.h"
 #include "generic_avl_tree.h"
-#include "cache_utils.h"
 #include "db_utils.h"
 
 typedef struct TileColor {
@@ -28,7 +27,7 @@ TileColor* create_tile_color(unsigned int tile_id, unsigned int color);
 
 void destroy_tile_color_tree(TilesTree* tiles_tree);
 
-void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
+void flush_tiles_colors_tree(TilesTree *const tiles_tree,
                              const DbInfo* const db_info,
                              void (*callback)(unsigned char));
 
@@ -39,9 +38,7 @@ void flush_tiles_colors_node(const GenericNode* const tile_color_node,
                              unsigned char* const last_percent,
                              void (*callback)(unsigned char));
 
-static void tile_color_destructor(void* data) {
-    free(data);
-}
+void tile_color_destructor(void* data);
 
 static inline unsigned int calc_color(unsigned char* rgba_color) {
     return (((unsigned int) rgba_color[0]) << 24) +

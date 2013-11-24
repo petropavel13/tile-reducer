@@ -5,60 +5,139 @@
 #include "db_utils.h"
 #include <stdio.h>
 
-typedef struct GroupElement {
-    struct GroupElement* first;
-    Tile* node;
-    struct GroupElement* next;
-} GroupElement;
+typedef struct TilesSequence {
+    Tile* tile;
+    struct TilesSequence* next;
+} TilesSequence;
 
-typedef struct PathPoint {
-    struct PathPoint* parent;
-    struct SelectedPoint* selected_point;
-    struct PathPoint* child_left;
-    struct PathPoint* child_right;
-} PathPoint;
 
-typedef struct SelectedPoint {
-    struct GroupElement* sequence_head;
-    Tile* leader_node;
+typedef struct TileGroup {
+    Tile* leader_tile;
     unsigned int group_id;
-    unsigned int groups_count;
-    unsigned int rest_count;
-} SelectedPoint;
+} TileGroup;
 
-#define PERSISTENT_GROUP_NOT_DEFINED 0
+typedef struct TileGroupsSequence {
+    struct TileGroupsSequence* first;
+    TileGroup* item;
+    struct TileGroupsSequence* next;
+} TileGroupsSequence;
 
-void make_persistent_groups(DbInfo* const db_info,
+
+typedef struct BindedTile {
+    Tile* tile;
+    TileGroup* group;
+} BindedTile;
+
+typedef struct BindedTilesSequence {
+    BindedTile* item;
+    struct BindedTilesSequence* next;
+} BindedTilesSequence;
+
+
+typedef struct NodeResult {
+    unsigned int created_groups_count;
+    unsigned int rest_tiles_count;
+} NodeResult;
+
+
+typedef struct ResultSlot {
+    BindedTilesSequence* bt_seq;
+    TileGroupsSequence* tg_seq;
+    NodeResult node_result;
+    unsigned char is_empty;
+} ResultSlot;
+
+
+
+#define GROUP_ID_NOT_DEFINED 0
+
+#define LEFT_BEST (-1)
+#define EQUAL 0
+#define RIGHT_BEST 1
+
+
+void make_persistent_groups(const DbInfo* const db_info,
                             GenericNode *const tiles_root_node,
-                            unsigned int total, CacheInfo *const cache_info);
+                            const unsigned int total,
+                            CacheInfo *const cache_info,
+                            void (*callback)(unsigned int, unsigned int));
 
-void clusterize(GroupElement *const tiles_sequence,
-                unsigned int total,
-                unsigned int max_diff_pixels,
-                unsigned int max_allowed_tiles,
-                CacheInfo *const cache_info,
-                DbInfo *const db_info);
 
-PathPoint* make_group(GroupElement *const rest_tiles,
-                      unsigned int total,
-                      unsigned int offset,
-                      PathPoint *const parent_path,
-                      CacheInfo *const cache_info,
-                      DbInfo *const db_info,
-                      unsigned int max_diff_pixels,
-                      unsigned int max_allowed_tiles,
-                      unsigned int max_allowed_groups);
+void migrate_tile(GenericNode** from, GenericNode** to, const unsigned int tile_id);
 
-void delete_path(PathPoint* point, DbInfo *const db_info);
+void delete_tile_groups_sequence(TileGroupsSequence* const sequence);
 
-unsigned int get_count_of_sequence(const GroupElement *const head);
+void delete_binded_tiles_sequence(BindedTilesSequence* const sequence);
 
-GroupElement* get_element_with_index(GroupElement *const search_start_element, unsigned int index);
+void delete_result_slot(ResultSlot slot);
 
-GroupElement *find_tile_with_id(GroupElement *const search_start_element, unsigned int tile_id);
+void clusterize(GenericNode *const all_tiles,
+                const unsigned int all_tiles_count,
+                const unsigned int max_diff_pixels,
+                const DbInfo* const db_info,
+                CacheInfo* const cache_info);
 
-SelectedPoint* get_selected_point_for_branch(const PathPoint* branch);
+void clean_related_group(const Tile *const tile,
+                           TilesSequence **related_sequence_for_tile, const unsigned int related_sequence_count,
+                           const unsigned short int max_diff_pixels,
+                           CacheInfo* const cache_info);
 
-char choose_best(const PathPoint* left_path, const PathPoint* right_path);
+NodeResult calc_node_result(TileGroupsSequence* groups_sequence,
+                            const unsigned int groups_count,
+                            BindedTilesSequence* binded_tiles_sequence,
+                            GenericNode** used_tiles,
+                            GenericNode** not_used,
+                            const unsigned int unused_tiles_count,
+                            Tile *const tile,
+                            GenericNode *const related_tiles,
+                            const unsigned int max_diff_pixels,
+                            CacheInfo* const cache_info);
+
+
+NodeResult calc_left_node_result(TileGroupsSequence* groups_sequence,
+                                 const unsigned int groups_count,
+                                 GenericNode** used_tiles,
+                                 GenericNode** not_used,
+                                 BindedTilesSequence* binded_tiles_sequence,
+                                 const unsigned int unused_tiles_count,
+                                 Tile* const tile,
+                                 GenericNode *const related_tiles,
+                                 TilesSequence *related_tiles_sequence,
+                                 const unsigned int max_diff_pixels,
+                                 CacheInfo* const cache_info);
+
+
+NodeResult calc_node_result_group_selected(TileGroupsSequence* groups_sequence,
+                                           const unsigned int groups_count,
+                                           BindedTilesSequence* binded_tiles_sequence,
+                                           GenericNode** used_tiles,
+                                           GenericNode** not_used,
+                                           const unsigned int unused_tiles_count,
+                                           GenericNode *const related_tiles,
+                                           TilesSequence *related_tiles_sequence,
+                                           const unsigned int max_diff_pixels,
+                                           CacheInfo* const cache_info);
+
+TilesSequence *make_tile_sequence_from_tree(const GenericNode* const node, TilesSequence* const sequence);
+
+void delete_tiles_sequence(TilesSequence* const tile_sequence);
+
+void tile_sequence_destructor(void* data);
+
+GenericNode* create_tiles_tree_from_tiles_ids(GenericNode *const all_tiles,
+                                              const unsigned int* const ids,
+                                              const unsigned int count);
+
+TilesSequence* create_tiles_sequence_from_tile_ids(GenericNode *const tiles,
+                                                   const unsigned int* const ids,
+                                                   const unsigned int count);
+
+TileGroupsSequence* create_tiles_groups_sequence_from_ids(GenericNode *const all_tiles,
+                                                          const unsigned int* const groups_ids,
+                                                          const unsigned int* const leader_tiles_ids,
+                                                          const unsigned int count);
+
+
+char choose_best_result(const NodeResult left_node_result, const NodeResult right_node_result);
 
 #endif // CLUSTER_UTILS_H

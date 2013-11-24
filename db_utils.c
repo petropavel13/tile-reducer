@@ -3,7 +3,6 @@
 DbInfo* init_db_info(PGconn* conn, size_t pg_sql_buffer_size) {
     DbInfo* db_info = malloc(sizeof(DbInfo));
     db_info->conn = conn;
-    db_info->last_virtual_group_id = 0;
     db_info->db_buffer = malloc(sizeof(DbBuffer));
     db_info->db_buffer->current_offset = 0;
     db_info->db_buffer->max_buffer_size = pg_sql_buffer_size;
@@ -12,18 +11,18 @@ DbInfo* init_db_info(PGconn* conn, size_t pg_sql_buffer_size) {
     return db_info;
 }
 
-void materialize_count_equality_view(const DbInfo* const db_info) {
+void materialize_count_equality(const DbInfo* const db_info) {
     clear_working_set(db_info);
     create_working_set(db_info);
 
     materialize_tile_color_count(db_info);
 
-    char sql[strlen(materialization_sql_template) - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN];
+    char sql[strlen(materialization_of_count_equality_sql_template) - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN];
 
     unsigned int temp_tile_id = get_next_tile_from_working_set(db_info);
 
     while (temp_tile_id != 0) {
-        sprintf(sql, materialization_sql_template, temp_tile_id, temp_tile_id, temp_tile_id);
+        sprintf(sql, materialization_of_count_equality_sql_template, temp_tile_id, temp_tile_id, temp_tile_id);
 
         exec_no_result(db_info, sql);
 
@@ -32,7 +31,64 @@ void materialize_count_equality_view(const DbInfo* const db_info) {
 }
 
 void materialize_tile_color_count(const DbInfo* const db_info) {
-    exec_no_result(db_info, "INSERT INTO tile_color_count (SELECT tile_id, count FROM tile_color_records_count_view);");
+    clear_tile_color_count(db_info);
+    exec_no_result(db_info, "INSERT INTO tile_color_count_mv (SELECT tile_id, count FROM tile_color_records_count_view);");
+}
+
+void materialize_tile_color_count_wo_persistent(const DbInfo* const db_info) {
+    clear_tile_color_count(db_info);
+    exec_no_result(db_info, materialization_of_tile_color_count_without_persistent);
+}
+
+void read_related_tiles_ids(const DbInfo* const db_info,
+                            const unsigned int related_tile_id,
+                            unsigned int * const ids,
+                            unsigned int * const count,
+                            const unsigned int max_diff_pixels) {
+    char sql[strlen(select_related_tiles_ids_sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
+
+    sprintf(sql, select_related_tiles_ids_sql_template, related_tile_id, max_diff_pixels);
+
+    PGresult* const res = PQexec(db_info->conn, sql);
+
+    (*count) = PQntuples(res);
+
+    for (unsigned int i = 0; i < (*count); ++i) {
+        ids[i] = atoi(PQgetvalue(res, i, 0));
+    }
+
+    PQclear(res);
+}
+
+void read_working_set_tiles_ids(const DbInfo* const db_info, unsigned int* const ids, unsigned int* const count) {
+    PGresult* const res = PQexec(db_info->conn, "SELECT tile_id FROM working_set;");
+
+    (*count) = PQntuples(res);
+
+    for (unsigned int i = 0; i < (*count); ++i) {
+        ids[i] = atoi(PQgetvalue(res, i, 0));
+    }
+
+    PQclear(res);
+}
+
+void read_persistent_groups(const DbInfo* const db_info,
+                            unsigned int** const groups_ids,
+                            unsigned int ** const leaders_ids,
+                            unsigned int* const count) {
+    PGresult* const res = PQexec(db_info->conn, "SELECT id, leader_tile_id FROM persistent_groups;");
+
+    (*count) = PQntuples(res);
+
+    *groups_ids = (unsigned int*)malloc(sizeof(unsigned int) * (*count));
+    *leaders_ids = (unsigned int*)malloc(sizeof(unsigned int) * (*count));
+
+    for (unsigned int i = 0; i < (*count); ++i) {
+        (*groups_ids)[i] = atoi(PQgetvalue(res, i, 0));
+        (*leaders_ids)[i] = atoi(PQgetvalue(res, i, 1));
+    }
+
+    PQclear(res);
 }
 
 unsigned char check_is_table_exist(const DbInfo* const db_info, const char* const table_name) {
@@ -40,9 +96,7 @@ unsigned char check_is_table_exist(const DbInfo* const db_info, const char* cons
 
     sprintf(sql, exists_template, table_name);
 
-    PGresult *res;
-
-    res = PQexec(db_info->conn, sql);
+    PGresult *res = PQexec(db_info->conn, sql);
 
     unsigned char exists = PQgetvalue(res, 0, 0)[0] == 't';
 
@@ -80,12 +134,12 @@ void create_tables_if_not_exists(const DbInfo* const db_info) {
         exec_no_result(db_info, create_table_working_set);
     }
 
-    if(check_is_table_exist(db_info,"materialized_count_equality_view") == TABLE_DOESNT_EXIST) {
-        exec_no_result(db_info, create_table_materialized_count_equality_view);
+    if(check_is_table_exist(db_info,"count_equality_mv") == TABLE_DOESNT_EXIST) {
+        exec_no_result(db_info, create_table_count_equality_mv);
     }
 
-    if(check_is_table_exist(db_info,"tile_color_count") == TABLE_DOESNT_EXIST) {
-        exec_no_result(db_info, create_tile_color_count_table);
+    if(check_is_table_exist(db_info,"tile_color_count_mv") == TABLE_DOESNT_EXIST) {
+        exec_no_result(db_info, create_tile_color_count_mv_table);
     }
 
 
@@ -95,12 +149,10 @@ void create_tables_if_not_exists(const DbInfo* const db_info) {
 
 void clear_all_data(const DbInfo* const db_info) {
     exec_no_result(db_info, clear_data_sql);
-    exec_no_result(db_info, restart_sequences);
 }
 
 void clear_session_data(const DbInfo* const db_info) {
     exec_no_result(db_info, clear_session_data_sql);
-    exec_no_result(db_info, restart_session_sequences);
 }
 
 void write_tiles_paths(const DbInfo* const db_info,
@@ -205,9 +257,7 @@ void write_tiles_paths(const DbInfo* const db_info,
 void read_tiles_ids(const DbInfo *const db_info, unsigned int* const ids_in_pg) {
     const char select_ids_sql[] = "SELECT id FROM tiles;";
 
-    PGresult *res;
-
-    res = PQexec(db_info->conn, select_ids_sql);
+    PGresult *res = PQexec(db_info->conn, select_ids_sql);
 
     const unsigned int count_objects = PQntuples(res);
 
@@ -221,9 +271,7 @@ void read_tiles_ids(const DbInfo *const db_info, unsigned int* const ids_in_pg) 
 unsigned char check_tiles_in_db(const DbInfo* const db_info, unsigned int guess_count) {
     const char count_sql[] = "SELECT COUNT(*) FROM tiles;";
 
-    PGresult *res;
-
-    res = PQexec(db_info->conn, count_sql);
+    PGresult *res = PQexec(db_info->conn, count_sql);
 
     const unsigned int count_objects = atoi(PQgetvalue(res, 0, 0));
 
@@ -242,7 +290,7 @@ unsigned char check_tiles_in_db(const DbInfo* const db_info, unsigned int guess_
 unsigned int create_group(DbInfo *db_info, unsigned int leader_tile_id) {
     PGresult *res;
 
-    const char sql_template[] = "INSERT INTO tiles_groups (leader_tile_id) VALUES(%d) RETURNING id;";
+    const char sql_template[] = "INSERT INTO tiles_groups (leader_tile_id) VALUES(%u) RETURNING id;";
 
     char sql[128];
 
@@ -257,61 +305,11 @@ unsigned int create_group(DbInfo *db_info, unsigned int leader_tile_id) {
     return group_id;
 }
 
-unsigned int create_virtual_group(DbInfo* db_info) {
-    return db_info->last_virtual_group_id++;
-}
-
-void read_colors(const DbInfo* const db_info, unsigned int** colors, unsigned int* count) {
-    PGresult* res;
-
-    res = PQexec(db_info->conn, "SELECT color FROM (SELECT color, SUM(repeat_count) FROM tile_color GROUP BY 1 ORDER BY 2 DESC) AS t;");
-
-    (*count) = PQntuples(res);
-
-    (*colors) = malloc(sizeof(unsigned int) * (*count));
-
-    for (unsigned int i = 0; i < (*count); ++i) {
-        (*colors)[i] = atoi(PQgetvalue(res, i, 0));
-    }
-
-    PQclear(res);
-}
-
-void add_tile_to_group(const DbInfo *const db_info, unsigned int group_id, unsigned int tile_id) {
-    return;
-    PGresult *res;
-
-    const char sql_template[] = "INSERT INTO tile_group (group_id, tile_id) VALUES(%d, %d);";
-
-    char sql[128];
-
-    sprintf(sql, sql_template, group_id, tile_id);
-
-    res = PQexec(db_info->conn, sql);
-
-    PQclear(res);
-}
-
-void delete_group(DbInfo *db_info, unsigned int group_id) {
-    return;
-    PGresult *res;
-
-    const char sql_template[] = "DELETE FROM tiles_groups WHERE id = %d;";
-
-    char sql[128];
-
-    sprintf(sql, sql_template, group_id);
-
-    res = PQexec(db_info->conn, sql);
-
-    PQclear(res);
-}
-
 void load_zero_equals_ids(const DbInfo* const db_info,
                           unsigned int tile_id,
                           unsigned int* ids_in_pg,
                           unsigned int* count) {
-    const char sql_template[] = "SELECT right_tile_id FROM materialized_count_equality_view WHERE left_tile_id = %d;";
+    const char sql_template[] = "SELECT right_tile_id FROM count_equality_mv WHERE left_tile_id = %u;";
 
     char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 
@@ -327,7 +325,7 @@ void load_zero_equals_ids(const DbInfo* const db_info,
 }
 
 unsigned int create_persistent_group(const DbInfo* const db_info, const unsigned int leader_tile_id) {
-    const char sql_template[] = "INSERT INTO persistent_groups(leader_tile_id) VALUES (%d) RETURNING id";
+    const char sql_template[] = "INSERT INTO persistent_groups(leader_tile_id) VALUES (%u) RETURNING id";
 
     char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 
@@ -345,7 +343,7 @@ unsigned int create_persistent_group(const DbInfo* const db_info, const unsigned
 void add_tile_to_persistent_group(const DbInfo* const db_info,
                                 const unsigned int tile_id,
                                 const unsigned int persistent_group_id) {
-    const char sql_template_fill_group[] = "INSERT INTO persistent_group_tile (group_id, tile_id) VALUES(%d, %d)";
+    const char sql_template_fill_group[] = "INSERT INTO persistent_group_tile (group_id, tile_id) VALUES(%u, %u)";
 
     char sql[strlen(sql_template_fill_group) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 
@@ -379,7 +377,7 @@ void add_tile_to_persistent_group_using_buffer(const DbInfo* const db_info,
     }
 }
 
-void delete_db_info(DbInfo* db_info) {
+void delete_db_info(DbInfo *const db_info) {
     free(db_info->db_buffer->buffer_str);
     free(db_info->db_buffer);
     free(db_info);
@@ -446,8 +444,11 @@ void create_working_set(const DbInfo* const db_info) {
     exec_no_result(db_info, "INSERT INTO working_set(tile_id) SELECT id FROM tiles;");
 }
 
-void create_working_set_wo_persistent_records(const DbInfo* const db_info) {
-    exec_no_result(db_info, "INSERT INTO working_set(tile_id) (SELECT id FROM tiles WHERE id NOT IN (SELECT tile_id FROM persistent_group_tile));");
+void create_working_set_wo_persistent_records_w_max_diff(const DbInfo* const db_info, const unsigned short max_diff_pixels) {
+    char sql[strlen(insert_into_working_set_without_persistent_wth_max_diff_sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
+
+    sprintf(sql, insert_into_working_set_without_persistent_wth_max_diff_sql_template, max_diff_pixels);
+    exec_no_result(db_info, sql);
 }
 
 unsigned int get_next_tile_from_working_set(const DbInfo* const db_info) {
@@ -465,7 +466,7 @@ unsigned int get_next_tile_from_working_set(const DbInfo* const db_info) {
 }
 
 void remove_tile_from_working_set(const DbInfo* const db_info, unsigned int tile_id) {
-    const char sql_template[] = "DELETE FROM working_set WHERE tile_id = %d;";
+    const char sql_template[] = "DELETE FROM working_set WHERE tile_id = %u;";
 
     char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 
@@ -474,7 +475,7 @@ void remove_tile_from_working_set(const DbInfo* const db_info, unsigned int tile
 }
 
 void remove_tiles_from_working_set_via_zero_equals(const DbInfo* const db_info, const unsigned int left_tile_id) {
-    const char sql_template[] = "DELETE FROM working_set WHERE tile_id IN (SELECT right_tile_id FROM materialized_count_equality_view WHERE left_tile_id = %d);";
+    const char sql_template[] = "DELETE FROM working_set WHERE tile_id IN (SELECT right_tile_id FROM count_equality_mv WHERE left_tile_id = %u);";
 
     char sql[strlen(sql_template) + MAX_UINT32_STR_LEN - STRING_TEMPLATE_SIZE];
 

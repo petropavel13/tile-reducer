@@ -53,7 +53,7 @@ unsigned char get_tile_data(unsigned int tile_id,
 }
 
 unsigned char get_diff_from_cache(unsigned long key,
-                       CacheInfo *cache_info,
+                       CacheInfo *const cache_info,
                        unsigned short* const diff_pixels) {
     GenericNode* const current_edge_root = cache_info->edges_root_node;
 
@@ -90,7 +90,7 @@ void delete_edges_tail(CacheInfo* const cache_info) {
 
 void push_image_to_cache(unsigned int tile_id,
                          unsigned char* tile_data,
-                         CacheInfo* cache_info) {
+                         CacheInfo *const cache_info) {
     while(calc_images_nodes_cache_size(cache_info) >= cache_info->max_cache_size_images_nodes) {
         delete_images_tail(cache_info);
     }
@@ -104,7 +104,7 @@ void push_image_to_cache(unsigned int tile_id,
 
 void push_edge_to_cache(unsigned long key,
                         unsigned short diff_pixels,
-                        CacheInfo *cache_info) {
+                        CacheInfo* const cache_info) {
     while(calc_edge_nodes_cache_size(cache_info) >= cache_info->max_cache_size_edge_nodes) {
         delete_edges_tail(cache_info);
     }
@@ -135,4 +135,12 @@ void delete_cache(CacheInfo* cache_info) {
     free(cache_info->edges_tree_info);
 
     free(cache_info);
+}
+
+void edge_data_destructor(void* data) {
+    free(data);
+}
+
+void image_data_destructor(void* data) {
+    free(data);
 }

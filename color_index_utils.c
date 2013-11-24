@@ -3,7 +3,7 @@
 
 TilesTree* init_tiles_tree(void) {
     TilesTree* const tiles_tree = malloc(sizeof(TilesTree));
-    tiles_tree->root_node = NULL;
+    tiles_tree->root_node = create_node(0, NULL);
     tiles_tree->tree_info = malloc(sizeof(TreeInfo));
     tiles_tree->tree_info->data_destructor = &tile_color_destructor;
 
@@ -34,26 +34,17 @@ TileColor* create_or_get_tile_color(unsigned int tile_id, unsigned int color, Ti
 
     GenericNode* const root_node = tiles_tree->root_node;
 
-    if(root_node != NULL) {
-        GenericNode* const node = find(root_node, key);
+    GenericNode* const node = find(root_node, key);
 
-        if(node == NULL) {
-            goto create_and_return;
-        } else {
-            return node->data;
-        }
-    } else {
-        goto create_and_return;
-    }
-
-create_and_return:
-    {
+    if(node == NULL) {
         TileColor* const new_color = create_tile_color(tile_id, color);
 
         tiles_tree->root_node = insert(root_node, key, new_color);
 
         return new_color;
     }
+
+    return node->data;
 }
 
 TileColor* create_tile_color(unsigned int tile_id, unsigned int color) {
@@ -69,24 +60,25 @@ void destroy_tile_color_tree(TilesTree* tiles_tree) {
     destroy_tree(tiles_tree->root_node, tiles_tree->tree_info);
 }
 
-void flush_tiles_colors_tree(const TilesTree* const tiles_tree,
+void flush_tiles_colors_tree(TilesTree* const tiles_tree,
                              const DbInfo* const db_info,
                              void (*callback)(unsigned char)) {
-    if(tiles_tree->root_node != NULL) {
-        drop_index_tile_color(db_info);
+    GenericNode* const root_node = remove_node(tiles_tree->root_node, 0, tiles_tree->tree_info);
+    tiles_tree->root_node = root_node;
 
-        unsigned long total = 0;
-        calc_elements_count(tiles_tree->root_node, &total);
+    drop_index_tile_color(db_info);
 
-        unsigned long current = 0;
-        unsigned char percent = 0;
+    unsigned long total = 0;
+    calc_elements_count(root_node, &total);
 
-        flush_tiles_colors_node(tiles_tree->root_node, db_info, &total, &current, &percent, callback);
+    unsigned long current = 0;
+    unsigned char percent = 0;
 
-        flush_db_buffer(db_info);
+    flush_tiles_colors_node(root_node, db_info, &total, &current, &percent, callback);
 
-        create_index_tile_color(db_info);
-    }
+    flush_db_buffer(db_info);
+
+    create_index_tile_color(db_info);
 }
 
 void flush_tiles_colors_node(const GenericNode* const tile_color_node,
@@ -113,4 +105,8 @@ void flush_tiles_colors_node(const GenericNode* const tile_color_node,
         flush_tiles_colors_node(tile_color_node->left, db_info, total, current, last_percent, callback);
         flush_tiles_colors_node(tile_color_node->right, db_info, total, current, last_percent, callback);
     }
+}
+
+void tile_color_destructor(void* data) {
+    free(data);
 }

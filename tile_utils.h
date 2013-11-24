@@ -51,16 +51,18 @@ void read_tiles_paths(const char* path,
 
 void delete_tile_file(TileFile* tile_file);
 
+unsigned short compare_images_cpu(unsigned char* raw_left_image, unsigned char* raw_right_image);
+
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
                  unsigned char** pixels);
 
 unsigned int calc_diff(const Tile* const left_node,
                        const Tile* const right_node,
-                       CacheInfo* const cache_info);
+                       CacheInfo *const cache_info);
 
 void calc_diff_one_with_many(const Tile* const left_tile,
-                             const Tile **const right_tiles,
+                             const Tile *const*const right_tiles,
                              const unsigned int right_tiles_count,
                              CacheInfo* const cache_info,
                              unsigned short *const results);

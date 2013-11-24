@@ -17,30 +17,31 @@ typedef struct TreeInfo {
 } TreeInfo;
 
 
-GenericNode* create_node(unsigned long key, void *data);
+GenericNode* create_node(const unsigned long key, void *const data);
 
 void recalc_height(GenericNode* const p);
 
-GenericNode* rotate_right(GenericNode* p);
-GenericNode* rotate_left(GenericNode* q);
+GenericNode* rotate_right(GenericNode* const p);
+GenericNode* rotate_left(GenericNode* const q);
 
 GenericNode* balance(GenericNode* const p);
 
 
-GenericNode* find(GenericNode* node, unsigned long key);
+GenericNode* find(GenericNode *const node, const unsigned long key);
 
-GenericNode* insert(GenericNode* const p, unsigned long key, void *data);
+GenericNode* insert(GenericNode *p, const unsigned long key, void *const data);
 
-GenericNode* find_min(GenericNode *p);
+GenericNode* find_min(GenericNode *const p);
 
 GenericNode* remove_min(GenericNode *const p);
 
 GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo *const tree_info);
 
-void destroy_tree(GenericNode* root_node, const TreeInfo* const tree_info);
+void destroy_tree(GenericNode* const root_node, const TreeInfo* const tree_info);
 
 void calc_elements_count(const GenericNode* const node, unsigned long* const count);
 
+void avl_shallow_copy(const GenericNode* const src, GenericNode* dest);
 
 static inline unsigned char get_height(const GenericNode* const p)
 {

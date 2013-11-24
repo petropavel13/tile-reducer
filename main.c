@@ -8,8 +8,6 @@
 
 #include <libpq-fe.h>
 
-#define SLEEP_MICSECS_ON_CUDA_ERROR 8000000
-
 #define DEFAULT_MB_IMAGE_CACHE_SIZE 512
 #define DEFAULT_MB_DIFF_CACHE_SIZE 128
 #define DEFAULT_MB_PG_SQL_BUFFER_SIZE 8
@@ -31,6 +29,12 @@ void print_progress_tiles_db_write(unsigned int current) {
 void print_progress_tiles_colors_db_write(const unsigned char percent_done) {
     printf("\r                            ");
     printf("\rWriting tiles colors to db...%d%%", percent_done);
+    fflush(stdout);
+}
+
+void print_make_persistent_groups(const unsigned int current, const unsigned int candidates_count) {
+    printf("\r                                                ");
+    printf("\rMaking persistent groups...%d(%d)", current, candidates_count);
     fflush(stdout);
 }
 
@@ -59,8 +63,8 @@ int main(int argc, char* argv [])
     printf("\rTotal tiles count: %d         \n", total);
     fflush(stdout);
 
-//    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
-    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=123");
+    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
+//    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=123");
 //    PGconn* conn = PQconnectdb("dbname=tiles_db host=/var/run/postgresql user=postgres password=123");
 
     printf("Connecting to db...");
@@ -125,37 +129,23 @@ int main(int argc, char* argv [])
 
     TreeInfo* tree_info = (TreeInfo*)malloc(sizeof(TreeInfo));
     tree_info->data_destructor = NULL;
-    GenericNode* root_node = NULL;
 
-    GroupElement* tiles_sequence = malloc(sizeof(GroupElement));
-    tiles_sequence->first = tiles_sequence;
+    Tile* temp_tile = malloc(sizeof(Tile));
+    temp_tile->tile_id = pg_ids[0];
+    temp_tile->tile_file = read_tile(tiles_paths[0]);
 
-    GroupElement* prev = NULL;
-
-    Tile* temp_tile = NULL;
+    GenericNode* all_tiles = create_node(temp_tile->tile_id, temp_tile);
 
     unsigned int current = 0;
     unsigned char last_percent = 0;
 
-    for (unsigned int i = 0; i < total; ++i)
+    for (unsigned int i = 1; i < total; ++i)
     {
         temp_tile = malloc(sizeof(Tile));
         temp_tile->tile_id = pg_ids[i];
         temp_tile->tile_file = read_tile(tiles_paths[i]);
 
-        if(root_node != NULL) {
-            root_node = insert(root_node, temp_tile->tile_id, temp_tile);
-        } else {
-            root_node = create_node(temp_tile->tile_id, temp_tile);
-        }
-
-        tiles_sequence->node = temp_tile;
-        tiles_sequence->next = malloc(sizeof(GroupElement));
-        tiles_sequence->next->first = tiles_sequence->first;
-
-        prev = tiles_sequence;
-
-        tiles_sequence = tiles_sequence->next;
+        all_tiles = insert(all_tiles, temp_tile->tile_id, temp_tile);
 
         const unsigned char current_percent = (++current / (total / 100));
 
@@ -166,11 +156,6 @@ int main(int argc, char* argv [])
             last_percent = current_percent;
         }
     }
-
-    prev->next = NULL;
-    free(tiles_sequence);
-    tiles_sequence = prev;
-
 
     printf("\r                                                ");
     printf("\rLoading tiles into RAM...done\n");
@@ -186,17 +171,23 @@ int main(int argc, char* argv [])
     if(res != TILES_ALREADY_EXISTS) {
         TilesTree* const tiles_tree = init_tiles_tree();
 
-        GroupElement* temp_group_elem = tiles_sequence->first;
+        TilesSequence* const all_tiles_sequence = (TilesSequence*)malloc(sizeof(TilesSequence));
 
-        for (int i = 0; temp_group_elem != NULL; ++i) {
+        TilesSequence* const last = make_tile_sequence_from_tree(all_tiles, all_tiles_sequence);
+
+        TilesSequence* t_seq = all_tiles_sequence;
+
+        for (unsigned int i = 0; t_seq != NULL && t_seq != last; ++i) {
             printf("\r                                                ");
             printf("\rIndexing tiles colors...%d", i);
             fflush(stdout);
 
-            index_tile(temp_group_elem->node, tiles_tree);
+            index_tile(t_seq->tile, tiles_tree);
 
-            temp_group_elem = temp_group_elem->next;
+            t_seq = t_seq->next;
         }
+
+        delete_tiles_sequence(all_tiles_sequence);
 
         printf("\r                                                ");
         printf("\rIndexing tiles colors...done\n");
@@ -214,27 +205,35 @@ int main(int argc, char* argv [])
         printf("\rMaterializing count equality view...");
         fflush(stdout);
 
-        materialize_count_equality_view(db_info);
+        materialize_count_equality(db_info);
 
         printf("\r                                                ");
         printf("\rMaterializing count equality view...done\n");
         fflush(stdout);
+
+        make_persistent_groups(db_info, all_tiles, total, cache_info, &print_make_persistent_groups);
+
+        printf("\r                                                ");
+        printf("\rMaking persistent groups...done\n");
+        fflush(stdout);
     }
 
-    make_persistent_groups(db_info, root_node, total, cache_info);
-//    clusterize(tiles_sequence, total, max_diff_pixels, total / 2, cache_info, db_info);
+//    return 0;
 
-    destroy_tree(root_node, tree_info);
+
+    clusterize(all_tiles, total, max_diff_pixels, db_info, cache_info);
+
+    destroy_tree(all_tiles, tree_info);
     free(tree_info);
 
-    const int images_hits = cache_info->image_hit_count;
-    const int images_misses = cache_info->image_miss_count;
+    const unsigned long images_hits = cache_info->image_hit_count;
+    const unsigned long images_misses = cache_info->image_miss_count;
 
-    const int diffs_hits = cache_info->edges_hit_count;
-    const int diffs_misses = cache_info->edges_miss_count;
+    const unsigned long diffs_hits = cache_info->edges_hit_count;
+    const unsigned long diffs_misses = cache_info->edges_miss_count;
 
-    printf("images | hits: %d, misses: %d, ratio: %f\n", images_hits, images_misses, ((float) images_hits / (float) images_misses));
-    printf("diffs  | hits: %d, misses: %d, ratio: %f\n", diffs_hits, diffs_misses, ((float) diffs_hits / (float) diffs_misses));
+    printf("images | hits: %lu, misses: %lu, ratio: %.2Lf\n", images_hits, images_misses, ((long double) images_hits / (long double) images_misses));
+    printf("diffs  | hits: %lu, misses: %lu, ratio: %.2Lf\n", diffs_hits, diffs_misses, ((long double) diffs_hits / (long double) diffs_misses));
 
     delete_cache(cache_info);
 

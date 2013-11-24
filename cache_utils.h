@@ -17,13 +17,13 @@ typedef struct CacheInfo
     GenericNode* edges_root_node;
     TreeInfo* edges_tree_info;
 
-    unsigned int images_nodes_in_cache;
-    unsigned int image_hit_count;
-    unsigned int image_miss_count;
+    unsigned long images_nodes_in_cache;
+    unsigned long image_hit_count;
+    unsigned long image_miss_count;
 
-    unsigned int edges_nodes_in_cache;
-    unsigned int edges_hit_count;
-    unsigned int edges_miss_count;
+    unsigned long edges_nodes_in_cache;
+    unsigned long edges_hit_count;
+    unsigned long edges_miss_count;
 } CacheInfo;
 
 #define CACHE_HIT 1
@@ -38,7 +38,7 @@ unsigned char get_tile_data(unsigned int tile_id,
                             unsigned char **const tile_data);
 
 unsigned char get_diff_from_cache(unsigned long key,
-                       CacheInfo *cache_info,
+                       CacheInfo *const cache_info,
                        unsigned short *const diff_pixels);
 
 inline static unsigned int calc_images_nodes_cache_size(const CacheInfo* const cache_info) {
@@ -55,20 +55,16 @@ void delete_edges_tail(CacheInfo *const cache_info);
 
 void push_image_to_cache(unsigned int tile_id,
                          unsigned char *tile_data,
-                         CacheInfo* cache_info);
+                         CacheInfo* const cache_info);
 
 void push_edge_to_cache(unsigned long key,
                         unsigned short int diff_pixels,
-                        CacheInfo* cache_info);
+                        CacheInfo* const cache_info);
 
 void delete_cache(CacheInfo* cache_info);
 
-static void edge_data_destructor(void* data) {
-    free(data);
-}
+void edge_data_destructor(void* data);
 
-static void image_data_destructor(void* data) {
-    free(data);
-}
+void image_data_destructor(void* data);
 
 #endif // CACHE_UTILS_H

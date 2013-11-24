@@ -1,6 +1,6 @@
 #include "generic_avl_tree.h"
 
-GenericNode* create_node(unsigned long key, void *data) {
+GenericNode* create_node(const unsigned long key, void *const data) {
     GenericNode* new_node = malloc(sizeof(GenericNode));
     new_node->key = key;
     new_node->data = data;
@@ -19,7 +19,7 @@ void recalc_height(GenericNode* const p)
     p->height = (hl > hr ? hl : hr) + 1;
 }
 
-GenericNode* rotate_right(GenericNode* p)
+GenericNode* rotate_right(GenericNode *const p)
 {
     GenericNode* const q = p->left;
     p->left = q->right;
@@ -29,7 +29,7 @@ GenericNode* rotate_right(GenericNode* p)
     return q;
 }
 
-GenericNode* rotate_left(GenericNode* q)
+GenericNode* rotate_left(GenericNode *const q)
 {
     GenericNode* const p = q->right;
     q->right = p->left;
@@ -64,7 +64,7 @@ GenericNode* balance(GenericNode* const p)
     return p; // балансировка не нужна
 }
 
-GenericNode* find(GenericNode *node, unsigned long key) {
+GenericNode* find(GenericNode *const node, const unsigned long key) {
     if( node == NULL ) {
         return NULL;
     }
@@ -79,7 +79,7 @@ GenericNode* find(GenericNode *node, unsigned long key) {
     }
 }
 
-GenericNode* insert(GenericNode* const p, unsigned long key, void* data) // вставка ключа k в дерево с корнем p
+GenericNode* insert(GenericNode* p, const unsigned long key, void *const data) // вставка ключа k в дерево с корнем p
 {
     if( p == NULL ) {
         return create_node(key, data);
@@ -87,15 +87,18 @@ GenericNode* insert(GenericNode* const p, unsigned long key, void* data) // вс
 
     if( key < p->key ) {
         p->left = insert(p->left, key, data);
-    }
-    else {
+    } else if( key > p->key) {
         p->right = insert(p->right, key, data);
+    } else {
+      // already exists. update
+        p->data = data;
+        return p;
     }
 
     return balance(p);
 }
 
-GenericNode* find_min(GenericNode* p) // поиск узла с минимальным ключом в дереве p
+GenericNode* find_min(GenericNode *const p) // поиск узла с минимальным ключом в дереве p
 {
     return p->left != NULL ? find_min(p->left) : p;
 }
@@ -148,7 +151,7 @@ GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo
     return balance(p);
 }
 
-void destroy_tree(GenericNode* root_node, const TreeInfo* const tree_info) {
+void destroy_tree(GenericNode *const root_node, const TreeInfo* const tree_info) {
     GenericNode* node = root_node;
 
     if(node != NULL) {
@@ -169,4 +172,18 @@ void calc_elements_count(const GenericNode* const node, unsigned long *const cou
         calc_elements_count(node->left, count);
         calc_elements_count(node->right, count);
     }
+}
+
+void avl_shallow_copy(const GenericNode* const src, GenericNode *dest) {
+    if(src == NULL)
+        return;
+
+    dest = insert(dest, src->key, src->data);
+    avl_shallow_copy(src->left, dest);
+
+    dest = insert(dest, src->key, src->data);
+    avl_shallow_copy(src, dest);
+
+    dest = insert(dest, src->key, src->data);
+    avl_shallow_copy(src->right, dest);
 }
