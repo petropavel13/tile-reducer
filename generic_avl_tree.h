@@ -41,7 +41,7 @@ void destroy_tree(GenericNode* const root_node, const TreeInfo* const tree_info)
 
 void calc_elements_count(const GenericNode* const node, unsigned long* const count);
 
-void avl_shallow_copy(const GenericNode* const src, GenericNode* dest);
+void avl_shallow_copy(const GenericNode* const src, GenericNode **const dest);
 
 static inline unsigned char get_height(const GenericNode* const p)
 {

@@ -174,16 +174,12 @@ void calc_elements_count(const GenericNode* const node, unsigned long *const cou
     }
 }
 
-void avl_shallow_copy(const GenericNode* const src, GenericNode *dest) {
+void avl_shallow_copy(const GenericNode* const src, GenericNode ** const dest) {
     if(src == NULL)
         return;
 
-    dest = insert(dest, src->key, src->data);
+    *dest = insert(*dest, src->key, src->data);
+
     avl_shallow_copy(src->left, dest);
-
-    dest = insert(dest, src->key, src->data);
-    avl_shallow_copy(src, dest);
-
-    dest = insert(dest, src->key, src->data);
     avl_shallow_copy(src->right, dest);
 }

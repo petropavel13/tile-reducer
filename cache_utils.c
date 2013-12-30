@@ -95,9 +95,7 @@ void push_image_to_cache(unsigned int tile_id,
         delete_images_tail(cache_info);
     }
 
-    GenericNode* const new_tree_head = insert(cache_info->images_root_node, tile_id, tile_data);
-
-    cache_info->images_root_node = new_tree_head;
+    cache_info->images_root_node = insert(cache_info->images_root_node, tile_id, tile_data);
 
     cache_info->images_nodes_in_cache++;
 }
@@ -112,9 +110,7 @@ void push_edge_to_cache(unsigned long key,
     unsigned short int* const l_diff_pixels = malloc(sizeof(unsigned short int));
     (*l_diff_pixels) = diff_pixels;
 
-    GenericNode* const new_tree_head = insert(cache_info->edges_root_node, key, l_diff_pixels);
-
-    cache_info->edges_root_node = new_tree_head;
+    cache_info->edges_root_node = insert(cache_info->edges_root_node, key, l_diff_pixels);
 
     cache_info->edges_nodes_in_cache++;
 }

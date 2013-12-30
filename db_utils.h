@@ -15,6 +15,8 @@
 #define STRING_TEMPLATE_SIZE 2
 #define MAX_UINT32_STR_LEN 10
 
+#define UINT32_MAX_CHARS_IN_STRING (MAX_UINT32_STR_LEN + STRING_TEMPLATE_SIZE)
+
 #define BUFFER_EMPTY 0
 #define BUFFER_FULL 1
 #define BUFFER_OK 2
@@ -48,20 +50,23 @@ void read_tiles_ids(const DbInfo* const db_info, unsigned int* const ids_in_pg);
 
 unsigned char check_tiles_in_db(const DbInfo *const db_info, unsigned int guess_count);
 
-unsigned int create_group(DbInfo *db_info, unsigned int leader_tile_id);
+void add_tile_to_group(DbInfo *db_info, unsigned int leader_tile_id, unsigned int tile_id);
 
-void load_zero_equals_ids(const DbInfo* const db_info,
-                          unsigned int tile_id,
-                          unsigned int* ids_in_pg, unsigned int *count);
-unsigned int create_persistent_group(const DbInfo* const db_info, const unsigned int leader_tile_id);
+void load_zero_equals_ids_leaders(const DbInfo* const db_info, unsigned int* ids_in_pg, unsigned int *count);
+
+void load_zero_equals_ids_for_tile(const DbInfo* const db_info,
+                              unsigned int tile_id,
+                              unsigned int* ids_in_pg, unsigned int *count);
 
 void add_tile_to_persistent_group(const DbInfo* const db_info,
                                 const unsigned int tile_id,
-                                const unsigned int persistent_group_id);
+                                const unsigned int leader_tile_id);
 
 void add_tile_to_persistent_group_using_buffer(const DbInfo* const db_info,
                                         const unsigned int tile_id,
-                                        const unsigned int persistent_group_id);
+                                        const unsigned int leader_tile_id);
+
+void reduce_persistent_tiles_groups(const DbInfo* const db_info);
 
 void delete_db_info(DbInfo* const db_info);
 
@@ -73,6 +78,7 @@ void insert_tile_color_using_buffer(const unsigned int tile_id,
                                     const unsigned int color,
                                     const unsigned int repeat_count,
                                     const DbInfo *const db_info);
+
 void flush_db_buffer(const DbInfo* const db_info);
 
 
@@ -80,8 +86,6 @@ void create_working_set(const DbInfo* const db_info);
 void create_working_set_wo_persistent_records_w_max_diff(const DbInfo* const db_info, const unsigned short max_diff_pixels);
 
 unsigned int get_next_tile_from_working_set(const DbInfo* const db_info);
-void remove_tile_from_working_set(const DbInfo* const db_info, unsigned int tile_id);
-void remove_tiles_from_working_set_via_zero_equals(const DbInfo* const db_info, const unsigned int left_tile_id);
 
 void materialize_count_equality(const DbInfo* const db_info);
 
@@ -142,8 +146,7 @@ static const char clear_session_data_sql[] = "TRUNCATE tile_color_count_mv, tile
 
 static const char clear_data_sql[] = "\
     TRUNCATE working_set,\
-        persistent_groups,\
-        persistent_group_tile,\
+        persistent_tiles_groups,\
         count_equality_mv,\
         tile_color,\
         tile_color_count_mv,\
@@ -156,9 +159,13 @@ static const char clear_data_sql[] = "\
 static const char sql_template_insert_tile_color[] = "INSERT INTO tile_color (tile_id, color, repeat_count) VALUES (%u,%u,%u)";
 static const char sql_template_values_tile_color[] = ",(%u,%u,%u)";
 
-static const char sql_template_insert_persistent_group_tile[] = "INSERT INTO persistent_group_tile(group_id, tile_id) VALUES(%u,%u)";
+
+static const char sql_template_insert_persistent_group_tile[] = "INSERT INTO persistent_tiles_groups(leader_tile_id, tile_id) VALUES(%u,%u);";
+static const char sql_buffer_template_insert_persistent_group_tile[] = "INSERT INTO persistent_tiles_groups(leader_tile_id, tile_id) VALUES(%u,%u)";
 static const char sql_template_values_persistent_group_tile[] = ",(%u,%u)";
 
+
+static const char sql_template_add_tile_to_group[] = "INSERT INTO tiles_groups (leader_tile_id, tile_id) VALUES(%u,%u);";
 
 static const char create_table_tiles[] = "\
     CREATE TABLE tiles (\
@@ -166,34 +173,34 @@ static const char create_table_tiles[] = "\
         tile_path character varying(255) NOT NULL,\
         CONSTRAINT id_pk PRIMARY KEY (id)\
     );\
-    CREATE UNIQUE INDEX tile_id_indx\
+    CREATE UNIQUE INDEX tiles_tile_id_indx\
     ON tiles\
     USING btree\
     (id);";
 
 
-static const char create_table_persistent_groups[] = "\
-    CREATE TABLE persistent_groups(\
-        id serial NOT NULL,\
-        leader_tile_id integer,\
-        CONSTRAINT persistent_group_pk PRIMARY KEY (id ),\
+static const char create_table_persistent_tiles_groups[] = "\
+    CREATE TABLE persistent_tiles_groups\
+    (\
+        leader_tile_id integer NOT NULL,\
+        tile_id integer NOT NULL,\
         CONSTRAINT leader_tile_id_fk FOREIGN KEY (leader_tile_id)\
             REFERENCES tiles (id) MATCH SIMPLE\
-            ON UPDATE CASCADE ON DELETE CASCADE\
-    )";
-
-
-static const char create_table_persistent_group_tile[] = "\
-    CREATE TABLE persistent_group_tile (\
-        group_id integer NOT NULL,\
-        tile_id integer NOT NULL,\
-        CONSTRAINT group_fk FOREIGN KEY (group_id)\
-            REFERENCES persistent_groups (id) MATCH SIMPLE\
             ON UPDATE CASCADE ON DELETE CASCADE,\
-        CONSTRAINT tile_fk FOREIGN KEY (tile_id)\
+        CONSTRAINT tile_id_fk FOREIGN KEY (tile_id)\
             REFERENCES tiles (id) MATCH SIMPLE\
             ON UPDATE CASCADE ON DELETE CASCADE\
-    );";
+    )\
+    \
+    CREATE INDEX persistent_tiles_groups_leader_tile_id_indx\
+    ON persistent_tiles_groups\
+    USING btree\
+    (leader_tile_id );\
+    \
+    CREATE INDEX persistent_tiles_groups_tile_id_indx\
+    ON persistent_tiles_groups\
+    USING btree\
+    (tile_id );";
 
 
 static const char create_table_tile_group[] = "\
@@ -256,10 +263,15 @@ static const char create_tile_color_records_count_view[] = "\
 
 
 // Postgresql WITH keyword save memory and reduce execution time
-static const char create_count_equality_view[] = "\
-    CREATE OR REPLACE VIEW count_equality_view AS \
-        WITH  tcc AS (SELECT tile_id, count FROM tile_color_count_mv)\
-        SELECT t0.tile_id AS left_tile_id, t1.tile_id AS right_tile_id\
+static const char create_count_equality_view_unordered[] = "\
+    CREATE OR REPLACE VIEW count_equality_view_unordered AS \
+        WITH tcc AS (\
+            SELECT tile_color_count_mv.tile_id, tile_color_count_mv.count\
+            FROM tile_color_count_mv\
+        )\
+        SELECT DISTINCT \
+            CASE WHEN t0.tile_id < t1.tile_id THEN t0.tile_id ELSE t1.tile_id END AS left_tile_id, \
+            CASE WHEN t0.tile_id > t1.tile_id THEN t0.tile_id ELSE t1.tile_id END AS right_tile_id \
         FROM tcc t0\
         JOIN tcc t1 ON t0.count = t1.count\
         WHERE t0.tile_id <> t1.tile_id;";
@@ -277,12 +289,12 @@ static const char create_table_count_equality_mv[] = "\
             ON UPDATE CASCADE ON DELETE CASCADE\
     );\
     \
-    CREATE INDEX mjrev_left_tile_id_indx\
+    CREATE INDEX count_equality_mv_left_tile_id_indx\
         ON count_equality_mv\
         USING btree\
         (left_tile_id );\
     \
-    CREATE INDEX mjrev_right_tile_id_indx\
+    CREATE INDEX count_equality_mv_right_tile_id_indx\
         ON count_equality_mv\
         USING btree\
         (right_tile_id );";
@@ -300,24 +312,23 @@ static const char create_tile_color_count_mv_table[] = "\
     CREATE INDEX tile_color_count_mv_tile_id_indx\
         ON tile_color_count_mv\
         USING btree\
-        (tile_id );";
+        (tile_id );\
+    \
+    CREATE INDEX tile_color_count_mv_count_indx\
+      ON tile_color_count_mv\
+      USING btree\
+      (count );";
 
 
-// Postgresql SELECT INTO statement save memory and reduce execution time
-static const char materialization_of_count_equality_sql_template[] = "\
-    DROP TABLE IF EXISTS matched_tiles;\
-    \
-    SELECT left_tile_id, right_tile_id\
-    INTO TEMP matched_tiles\
-    FROM count_equality_view\
-    WHERE left_tile_id = %u;\
-    \
-    INSERT INTO count_equality_mv (SELECT left_tile_id, right_tile_id FROM matched_tiles);\
-    \
-    DELETE FROM working_set WHERE tile_id IN (SELECT right_tile_id FROM matched_tiles);\
-    DELETE FROM working_set WHERE tile_id = %u;\
-    DELETE FROM tile_color_count_mv WHERE tile_id IN (SELECT right_tile_id FROM matched_tiles);\
-    DELETE FROM tile_color_count_mv WHERE tile_id = %u;";
+static const char reduce_persistent_tiles_groups_sql[] = "\
+    DELETE FROM persistent_tiles_groups ptg\
+    WHERE NOT EXISTS\
+        (SELECT 1 FROM\
+            (SELECT ptg0.leader_tile_id, ptg0.tile_id\
+            FROM persistent_tiles_groups ptg0\
+            LEFT JOIN persistent_tiles_groups ptg1 ON ptg0.leader_tile_id = ptg1.tile_id\
+            WHERE ptg1.leader_tile_id IS NULL) AS unique_records\
+        WHERE leader_tile_id = ptg.leader_tile_id AND tile_id = ptg.tile_id)";
 
 
 // Postgresql WITH keyword save memory and reduce execution time
@@ -327,10 +338,10 @@ static const char materialization_of_tile_color_count_without_persistent[] = "\
     (\
     (SELECT id AS tile_id FROM tiles)\
         EXCEPT\
-    (SELECT leader_tile_id FROM persistent_groups)\
+    (SELECT DISTINCT leader_tile_id FROM persistent_tiles_groups)\
     )\
         EXCEPT\
-    (SELECT tile_id FROM persistent_group_tile)\
+    (SELECT tile_id FROM persistent_tiles_groups)\
     )\
     SELECT tile_id, count FROM tile_color_records_count_view\
     WHERE tile_id IN (SELECT tile_id FROM available_tiles));";

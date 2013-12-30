@@ -11,10 +11,7 @@ typedef struct TilesSequence {
 } TilesSequence;
 
 
-typedef struct TileGroup {
-    Tile* leader_tile;
-    unsigned int group_id;
-} TileGroup;
+typedef Tile TileGroup;
 
 typedef struct TileGroupsSequence {
     struct TileGroupsSequence* first;
@@ -117,6 +114,23 @@ NodeResult calc_node_result_group_selected(TileGroupsSequence* groups_sequence,
                                            TilesSequence *related_tiles_sequence,
                                            const unsigned int max_diff_pixels,
                                            CacheInfo* const cache_info);
+
+
+void hungry_by_groups(TileGroupsSequence* groups_sequence,
+                            BindedTilesSequence* binded_tiles_sequence,
+                            GenericNode** used_tiles,
+                            GenericNode** not_used,
+                            Tile *const tile,
+                            const unsigned int max_diff_pixels,
+                            CacheInfo* const cache_info);
+
+
+unsigned char hungry_by_groups_left(TileGroupsSequence* groups_sequence,
+                                 BindedTilesSequence* binded_tiles_sequence,
+                                 Tile* const tile,
+                                 const unsigned int max_diff_pixels,
+                                 CacheInfo* const cache_info);
+
 
 TilesSequence *make_tile_sequence_from_tree(const GenericNode* const node, TilesSequence* const sequence);
 
