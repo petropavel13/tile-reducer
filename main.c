@@ -94,7 +94,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-    clear_all_data(db_info);
+//    clear_all_data(db_info);
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 

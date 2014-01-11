@@ -50,7 +50,8 @@ void read_tiles_ids(const DbInfo* const db_info, unsigned int* const ids_in_pg);
 
 unsigned char check_tiles_in_db(const DbInfo *const db_info, unsigned int guess_count);
 
-void add_tile_to_group(DbInfo *db_info, unsigned int leader_tile_id, unsigned int tile_id);
+void add_tile_to_group(const DbInfo * const db_info, unsigned int leader_tile_id, unsigned int tile_id);
+void add_tile_to_group_using_buffer(const DbInfo * const db_info, unsigned int leader_tile_id, unsigned int tile_id);
 
 void load_zero_equals_ids_leaders(const DbInfo* const db_info, unsigned int* ids_in_pg, unsigned int *count);
 
@@ -100,7 +101,6 @@ void read_related_tiles_ids(const DbInfo* const db_info, const unsigned int rela
 void read_working_set_tiles_ids(const DbInfo* const db_info, unsigned int *const ids, unsigned int* const count);
 
 void read_persistent_groups(const DbInfo* const db_info,
-                            unsigned int** const groups_ids,
                             unsigned int ** const leaders_ids,
                             unsigned int* const count);
 
@@ -141,7 +141,7 @@ static inline void commit_transaction(const DbInfo* const db_info) {
 static const char exists_template[] = "SELECT EXISTS(SELECT * FROM information_schema.tables WHERE table_name='%s')";
 
 
-static const char clear_session_data_sql[] = "TRUNCATE tile_color_count_mv, tile_group, tiles_groups, working_set RESTART IDENTITY CASCADE;";
+static const char clear_session_data_sql[] = "TRUNCATE tiles_groups, working_set RESTART IDENTITY CASCADE;";
 
 
 static const char clear_data_sql[] = "\
@@ -150,7 +150,6 @@ static const char clear_data_sql[] = "\
         count_equality_mv,\
         tile_color,\
         tile_color_count_mv,\
-        tile_group,\
         tiles_groups,\
         tiles\
     RESTART IDENTITY CASCADE;";
@@ -166,6 +165,8 @@ static const char sql_template_values_persistent_group_tile[] = ",(%u,%u)";
 
 
 static const char sql_template_add_tile_to_group[] = "INSERT INTO tiles_groups (leader_tile_id, tile_id) VALUES(%u,%u);";
+static const char sql_buffer_template_insert_tile_to_group[] = "INSERT INTO tiles_groups (leader_tile_id, tile_id) VALUES(%u,%u)";
+static const char sql_buffer_template_values_tile_to_group[] = ",(%u,%u)";
 
 static const char create_table_tiles[] = "\
     CREATE TABLE tiles (\
@@ -203,25 +204,14 @@ static const char create_table_persistent_tiles_groups[] = "\
     (tile_id );";
 
 
-static const char create_table_tile_group[] = "\
-    CREATE TABLE tile_group (\
-        tile_id integer NOT NULL,\
-        group_id integer NOT NULL,\
-        CONSTRAINT group_fk FOREIGN KEY (group_id)\
-            REFERENCES tiles_groups (id) MATCH SIMPLE\
-            ON UPDATE CASCADE ON DELETE CASCADE,\
-        CONSTRAINT tile_fk FOREIGN KEY (tile_id)\
-            REFERENCES tiles (id) MATCH SIMPLE\
-            ON UPDATE CASCADE ON DELETE CASCADE\
-    );";
-
-
 static const char create_table_tiles_groups[] = "\
-    CREATE TABLE tiles_groups (\
-        id serial NOT NULL,\
+    CREATE TABLE tiles_groups(\
         leader_tile_id integer NOT NULL,\
-        CONSTRAINT tiles_groups_pk PRIMARY KEY (id ),\
-        CONSTRAINT leader_tile_fk FOREIGN KEY (leader_tile_id)\
+        tile_id integer NOT NULL,\
+        CONSTRAINT leader_tile_id_fk FOREIGN KEY (tile_id)\
+            REFERENCES tiles (id) MATCH SIMPLE\
+            ON UPDATE CASCADE ON DELETE CASCADE,\
+        CONSTRAINT tile_id_fk FOREIGN KEY (tile_id)\
             REFERENCES tiles (id) MATCH SIMPLE\
             ON UPDATE CASCADE ON DELETE CASCADE\
     );";

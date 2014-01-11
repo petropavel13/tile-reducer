@@ -70,7 +70,6 @@ CONFIG(debug, debug|release) {
 
     cuda_d.input = CUDA_SOURCES
     cuda_d.output = $$CUDA_OBJECTS_DIR/${QMAKE_FILE_BASE}_cuda.o
-#    cuda_d.output = $$CUDA_OBJECTS_DIR/${QMAKE_FILE_BASE}.o
 # -G generates wrong code! be careful. (cuda 5.5)
 #    cuda_d.commands = $$CUDA_DIR/bin/nvcc -G -g -O0 -lineinfo $$NVCC_OPTIONS $$CUDA_INC --machine $$SYSTEM_TYPE -arch=$$CUDA_ARCH -c -o ${QMAKE_FILE_OUT} ${QMAKE_FILE_NAME}
     cuda_d.commands = $$CUDA_DIR/bin/nvcc -g -O0 -lineinfo $$NVCC_OPTIONS $$CUDA_INC --machine $$SYSTEM_TYPE -arch=$$CUDA_ARCH -c -o ${QMAKE_FILE_OUT} ${QMAKE_FILE_NAME}
@@ -83,7 +82,6 @@ else {
 
     cuda.input = CUDA_SOURCES
     cuda.output = $$CUDA_OBJECTS_DIR/${QMAKE_FILE_BASE}_cuda.o
-#    cuda.output = $$CUDA_OBJECTS_DIR/${QMAKE_FILE_BASE}.o
     cuda.commands = $$CUDA_DIR/bin/nvcc -O2 $$NVCC_OPTIONS $$CUDA_INC --machine $$SYSTEM_TYPE -arch=$$CUDA_ARCH -c -o ${QMAKE_FILE_OUT} ${QMAKE_FILE_NAME}
     cuda.dependency_type = TYPE_C
     QMAKE_EXTRA_COMPILERS += cuda

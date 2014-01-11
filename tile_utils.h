@@ -18,10 +18,6 @@
 
 #define USHORT_MAX 65535
 
-extern unsigned int compare_images(unsigned char* raw_left_image,
-                                   unsigned char* raw_right_image,
-                                   unsigned short int* diff_result);
-
 typedef struct TileFile
 {
     unsigned char* data;
@@ -51,7 +47,7 @@ void read_tiles_paths(const char* path,
 
 void delete_tile_file(TileFile* tile_file);
 
-unsigned short compare_images_cpu(unsigned char* raw_left_image, unsigned char* raw_right_image);
+unsigned short compare_images_cpu(unsigned char* const raw_left_image, unsigned char* const raw_right_image);
 
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,

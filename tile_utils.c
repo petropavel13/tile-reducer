@@ -93,7 +93,7 @@ void delete_tile_file(TileFile* tile_file) {
     free(tile_file);
 }
 
-unsigned short compare_images_cpu(unsigned char* raw_left_image, unsigned char* raw_right_image) {
+unsigned short compare_images_cpu(unsigned char * const raw_left_image, unsigned char * const raw_right_image) {
     unsigned int res = 0;
 
     for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
@@ -112,7 +112,7 @@ void load_pixels(const Tile* const tile,
     const unsigned char cache_res = get_tile_data(tile->tile_id, cache_info, pixels);
 
     if(cache_res == CACHE_MISS) {
-        unsigned int read_res = get_tile_pixels(tile->tile_file, pixels);
+        const unsigned int read_res = get_tile_pixels(tile->tile_file, pixels);
 
         if(read_res == 0) {
             push_image_to_cache(tile->tile_id, *pixels, cache_info);
@@ -140,18 +140,7 @@ unsigned int calc_diff(const Tile* const left_node,
 
     unsigned char* right_tile_pixels = NULL;
     load_pixels(right_node, cache_info, &right_tile_pixels);
-/*
-    const unsigned int compare_res = compare_images(left_tile_pixels, right_tile_pixels, &diff_result);
 
-    if(compare_res == TASK_FAILED) {
-        printf("\n\nGPU TASK FAILED\n\n");
-        fflush(stdout);
-
-        return USHORT_MAX;
-    } else {
-        push_edge_to_cache(key, diff_result, cache_info);
-    }
-*/
     diff_result = compare_images_cpu(left_tile_pixels, right_tile_pixels);
     push_edge_to_cache(key, diff_result, cache_info);
 

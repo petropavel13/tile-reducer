@@ -11,18 +11,16 @@ typedef struct TilesSequence {
 } TilesSequence;
 
 
-typedef Tile TileGroup;
-
 typedef struct TileGroupsSequence {
     struct TileGroupsSequence* first;
-    TileGroup* item;
+    Tile* leader_tile;
     struct TileGroupsSequence* next;
 } TileGroupsSequence;
 
 
 typedef struct BindedTile {
     Tile* tile;
-    TileGroup* group;
+    Tile* group_leader_tile;
 } BindedTile;
 
 typedef struct BindedTilesSequence {
@@ -147,7 +145,6 @@ TilesSequence* create_tiles_sequence_from_tile_ids(GenericNode *const tiles,
                                                    const unsigned int count);
 
 TileGroupsSequence* create_tiles_groups_sequence_from_ids(GenericNode *const all_tiles,
-                                                          const unsigned int* const groups_ids,
                                                           const unsigned int* const leader_tiles_ids,
                                                           const unsigned int count);
 
