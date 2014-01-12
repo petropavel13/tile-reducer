@@ -45,7 +45,7 @@ void read_tiles_paths(const char* path,
                       unsigned char *const last_percent,
                       void (*callback)(unsigned char));
 
-void delete_tile_file(TileFile* tile_file);
+void tile_file_destructor(TileFile* tile_file);
 
 unsigned short compare_images_cpu(unsigned char* const raw_left_image, unsigned char* const raw_right_image);
 
@@ -62,5 +62,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
                              const unsigned int right_tiles_count,
                              CacheInfo* const cache_info,
                              unsigned short *const results);
+
+void tile_destructor(void* data);
 
 #endif // TILE_UTILS_H

@@ -9,14 +9,7 @@ CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_tree_n
 
     cache_info->images_root_node = NULL;
 
-    cache_info->images_tree_info = malloc(sizeof(TreeInfo));
-    cache_info->images_tree_info->data_destructor = &image_data_destructor;
-
-
     cache_info->edges_root_node = NULL;
-
-    cache_info->edges_tree_info = malloc(sizeof(TreeInfo));
-    cache_info->edges_tree_info->data_destructor = &edge_data_destructor;
 
     cache_info->images_nodes_in_cache = 0;
     cache_info->image_hit_count = 0;
@@ -76,13 +69,13 @@ unsigned char get_diff_from_cache(unsigned long key,
 
 
 void delete_images_tail(CacheInfo* const cache_info) {
-    cache_info->images_root_node = remove_node(cache_info->images_root_node, find_min(cache_info->images_root_node)->key, cache_info->images_tree_info);
+    cache_info->images_root_node = remove_node(cache_info->images_root_node, find_min(cache_info->images_root_node)->key, &image_data_destructor);
 
     cache_info->images_nodes_in_cache--;
 }
 
 void delete_edges_tail(CacheInfo* const cache_info) {
-    cache_info->edges_root_node = remove_node(cache_info->edges_root_node, find_min(cache_info->edges_root_node)->key, cache_info->edges_tree_info);
+    cache_info->edges_root_node = remove_node(cache_info->edges_root_node, find_min(cache_info->edges_root_node)->key, &edge_data_destructor);
 
     cache_info->edges_nodes_in_cache--;
 }
@@ -116,19 +109,9 @@ void push_edge_to_cache(unsigned long key,
 }
 
 
-void delete_cache(CacheInfo* cache_info) {
-    destroy_tree(cache_info->edges_root_node, cache_info->edges_tree_info);
-    destroy_tree(cache_info->images_root_node, cache_info->images_tree_info);
-
-    cache_info->image_hit_count = 0;
-    cache_info->image_miss_count = 0;
-
-    cache_info->edges_hit_count = 0;
-    cache_info->edges_miss_count = 0;
-
-    free(cache_info->images_tree_info);
-
-    free(cache_info->edges_tree_info);
+void destroy_cache(CacheInfo* cache_info) {
+    destroy_tree(cache_info->edges_root_node, &edge_data_destructor);
+    destroy_tree(cache_info->images_root_node, &image_data_destructor);
 
     free(cache_info);
 }

@@ -12,10 +12,8 @@ typedef struct CacheInfo
     size_t tile_size_bytes;
 
     GenericNode* images_root_node;
-    TreeInfo* images_tree_info;
 
     GenericNode* edges_root_node;
-    TreeInfo* edges_tree_info;
 
     unsigned long images_nodes_in_cache;
     unsigned long image_hit_count;
@@ -61,7 +59,7 @@ void push_edge_to_cache(unsigned long key,
                         unsigned short int diff_pixels,
                         CacheInfo* const cache_info);
 
-void delete_cache(CacheInfo* cache_info);
+void destroy_cache(CacheInfo* cache_info);
 
 void edge_data_destructor(void* data);
 

@@ -33,7 +33,7 @@ typedef struct DbInfo {
 } DbInfo;
 
 
-DbInfo* init_db_info(PGconn* conn, size_t pg_sql_buffer_size);
+DbInfo* create_db_info(PGconn* conn, size_t pg_sql_buffer_size);
 
 void create_tables_if_not_exists(const DbInfo* const db_info);
 
@@ -69,7 +69,7 @@ void add_tile_to_persistent_group_using_buffer(const DbInfo* const db_info,
 
 void reduce_persistent_tiles_groups(const DbInfo* const db_info);
 
-void delete_db_info(DbInfo* const db_info);
+void destroy_db_info(DbInfo* const db_info);
 
 void add_to_buffer(const DbInfo* const db_info, const char * const sql, const size_t offset);
 unsigned char get_buffer_status(const DbInfo* const db_info, const size_t chars_to_insert);

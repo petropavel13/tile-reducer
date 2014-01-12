@@ -7,11 +7,15 @@
 #include "color_index_utils.h"
 
 #include <libpq-fe.h>
+#include <pthread.h>
 
 #define DEFAULT_MB_IMAGE_CACHE_SIZE 512
 #define DEFAULT_MB_DIFF_CACHE_SIZE 128
 #define DEFAULT_MB_PG_SQL_BUFFER_SIZE 8
+#define DEFAULT_NUM_THREADS 8
 
+#define LEFT 0
+#define RIGHT 1
 //#define DEBUG 1
 
 void print_progress_paths_read(const unsigned char percent_done) {
@@ -20,16 +24,34 @@ void print_progress_paths_read(const unsigned char percent_done) {
     fflush(stdout);
 }
 
-void print_progress_tiles_db_write(unsigned int current) {
+void print_progress_tiles_db_write(const unsigned int current) {
     printf("\r                            ");
     printf("\rWriting tiles paths to DB...%d", current);
     fflush(stdout);
 }
 
+void print_progress_index_colors(const unsigned char percent_done) {
+    if(percent_done <= 100) {
+        printf("\r                            ");
+        printf("\rIndexing tiles colors...%d%%", percent_done);
+        fflush(stdout);
+    } else {
+        printf("\r                                                ");
+        printf("\rIndexing tiles colors...done\n");
+        fflush(stdout);
+    }
+}
+
 void print_progress_tiles_colors_db_write(const unsigned char percent_done) {
-    printf("\r                            ");
-    printf("\rWriting tiles colors to db...%d%%", percent_done);
-    fflush(stdout);
+    if(percent_done <= 100) {
+        printf("\r                            ");
+        printf("\rWriting tiles colors to db...%d%%", percent_done);
+        fflush(stdout);
+    } else {
+        printf("\r                                                ");
+        printf("\rWriting tiles colors to db...done\n");
+        fflush(stdout);
+    }
 }
 
 void print_make_persistent_groups(const unsigned int current, const unsigned int candidates_count) {
@@ -38,11 +60,63 @@ void print_make_persistent_groups(const unsigned int current, const unsigned int
     fflush(stdout);
 }
 
+
+GenericNode* get_head(const GenericNode* const tiles_node, const unsigned char current_level, const unsigned char path) {
+    const unsigned char direction = ((unsigned char)((path >> current_level) << 7)) >> 7;
+
+    const GenericNode* const next_tree_node = direction == LEFT ? tiles_node->left : tiles_node->right;
+
+    return current_level == 0 ? next_tree_node : get_head(next_tree_node, current_level - 1, path);
+}
+
+
+GenericNode* get_tails(GenericNode* const tail, const GenericNode* const tiles_node, const unsigned char current_level) {
+    if (current_level == 0)
+        return tail;
+
+    GenericNode* const local_tail = get_tails(insert(tail, ((Tile*)tiles_node->left->data)->tile_id, tiles_node->left->data), tiles_node->left, current_level - 1);
+
+    return get_tails(insert(local_tail, tiles_node->right->key, tiles_node->right->data), tiles_node->right, current_level - 1);
+}
+
+
+void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_threads) {
+    pthread_t threads[num_threads];
+    GenericNode * heads[num_threads];
+    DbInfo * connections[num_threads];
+    TCTParams th_params[num_threads];
+
+    for (unsigned char i = 0; i < num_threads; ++i) {
+        heads[i] = get_head(tiles_tree, num_threads >> 2, i);
+        connections[i] = create_db_info(PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123"), 1024 * 1024 * 1);
+//        th_params[i] = make_tct_params(heads[i], NULL, NULL, connections[i]);
+        th_params[i] = make_tct_params(heads[i], &print_progress_index_colors, &print_progress_tiles_colors_db_write, connections[i]);
+        pthread_create(&threads[i], NULL, &index_tree_and_flush_result, &th_params[i]);
+    }
+
+
+    GenericNode* const tails = get_tails(create_node(tiles_tree->key, tiles_tree->data), tiles_tree, num_threads >> 2);
+
+    DbInfo* const db_info = create_db_info(PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123"), 1024 * 1024 * 1);
+    TCTParams params = make_tct_params(tails, NULL, NULL, db_info);
+
+    index_tree_and_flush_result(&params);
+
+    destroy_tree(tails, NULL);
+    destroy_db_info(db_info);
+
+    for (unsigned char i = 0; i < num_threads; ++i) {
+        pthread_join(threads[i], NULL);
+        destroy_db_info(connections[i]);
+    }
+}
+
+
 int main(int argc, char* argv [])
 {
     if(argc < 2) {
         printf("-- too few parameters! --\n");
-        printf("template: ./comparer /path/to/tiles/folder/ MAX_DIFF_PIXELS [MAX_MB_CACHE]\n");
+        printf("template: ./comparer /path/to/tiles/folder/ MAX_DIFF_PIXELS [MAX_MB_CACHE] [MAX_NUM_THREADS]\n");
         printf("example: ./comparer /tiles/opt_easy/ 16 4096\n");
         printf("example: ./comparer /tiles/opt_easy/ 64\n");
 
@@ -52,6 +126,7 @@ int main(int argc, char* argv [])
     const char* path = argv[1];
     const unsigned short int max_diff_pixels = atoi(argv[2]);
     const size_t max_cache_size_bytes = (argc > 3) ? ((size_t) atoi(argv[3])) * 1024 * 1024 : ((size_t) DEFAULT_MB_IMAGE_CACHE_SIZE) * 1024 * 1024;
+    const unsigned char max_num_threads = (argc > 4) ? atoi(argv[4]) : DEFAULT_NUM_THREADS;
 
     printf("Tiles folder: \"%s\";\nmax_diff_pixels: %d;\ncache_size: %d MB;\n\n", path, max_diff_pixels, (unsigned int) (max_cache_size_bytes / 1024 / 1024));
 
@@ -63,7 +138,7 @@ int main(int argc, char* argv [])
     printf("\rTotal tiles count: %d         \n", total);
     fflush(stdout);
 
-    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
+    PGconn* const conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
 //    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=123");
 //    PGconn* conn = PQconnectdb("dbname=tiles_db host=/var/run/postgresql user=postgres password=123");
 
@@ -76,7 +151,7 @@ int main(int argc, char* argv [])
         return 1;
     }
 
-    DbInfo* const db_info = init_db_info(conn, 1024 * 1024 * DEFAULT_MB_PG_SQL_BUFFER_SIZE);
+    DbInfo* const db_info = create_db_info(conn, 1024 * 1024 * DEFAULT_MB_PG_SQL_BUFFER_SIZE);
 
     printf("done\n");
     fflush(stdout);
@@ -94,7 +169,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-//    clear_all_data(db_info);
+    clear_all_data(db_info);
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
@@ -126,9 +201,6 @@ int main(int argc, char* argv [])
     }
 
     CacheInfo* const cache_info = init_cache(max_cache_size_bytes, DEFAULT_MB_DIFF_CACHE_SIZE * 1024 * 1024, TILE_SIZE_BYTES);
-
-    TreeInfo* tree_info = (TreeInfo*)malloc(sizeof(TreeInfo));
-    tree_info->data_destructor = NULL;
 
     Tile* temp_tile = malloc(sizeof(Tile));
     temp_tile->tile_id = pg_ids[0];
@@ -169,37 +241,16 @@ int main(int argc, char* argv [])
     free(tiles_paths);
 
     if(res != TILES_ALREADY_EXISTS) {
-        TilesTree* const tiles_tree = init_tiles_tree();
-
-        TilesSequence* const all_tiles_sequence = (TilesSequence*)malloc(sizeof(TilesSequence));
-
-        TilesSequence* const last = make_tile_sequence_from_tree(all_tiles, all_tiles_sequence);
-
-        TilesSequence* t_seq = all_tiles_sequence;
-
-        for (unsigned int i = 0; t_seq != NULL && t_seq != last; ++i) {
-            printf("\r                                                ");
-            printf("\rIndexing tiles colors...%d", i);
+        if (max_num_threads < 2) {
+            TCTParams params = make_tct_params(all_tiles, &print_progress_index_colors, &print_progress_tiles_colors_db_write, db_info);
+            index_tree_and_flush_result(&params);
+        } else {
+//            printf("Indexing and writing tiles color %u threads...", max_num_threads);
             fflush(stdout);
-
-            index_tile(t_seq->tile, tiles_tree);
-
-            t_seq = t_seq->next;
+            run_index_threads(all_tiles, max_num_threads);
+//            printf("\rIndexing and writing tiles color %u threads...done\n", max_num_threads);
+            fflush(stdout);
         }
-
-        delete_tiles_sequence(all_tiles_sequence);
-
-        printf("\r                                                ");
-        printf("\rIndexing tiles colors...done\n");
-        fflush(stdout);
-
-        flush_tiles_colors_tree(tiles_tree, db_info, &print_progress_tiles_colors_db_write);
-
-        printf("\r                                                ");
-        printf("\rWriting tiles colors to db...done\n");
-        fflush(stdout);
-
-        destroy_tile_color_tree(tiles_tree);
 
         printf("\r                                                ");
         printf("\rMaterializing count equality view...");
@@ -229,8 +280,7 @@ int main(int argc, char* argv [])
 
     clusterize(all_tiles, total, max_diff_pixels, db_info, cache_info);
 
-    destroy_tree(all_tiles, tree_info);
-    free(tree_info);
+    destroy_tree(all_tiles, &tile_destructor);
 
     const unsigned long images_hits = cache_info->image_hit_count;
     const unsigned long images_misses = cache_info->image_miss_count;
@@ -241,11 +291,9 @@ int main(int argc, char* argv [])
     printf("images | hits: %lu, misses: %lu, ratio: %.2Lf\n", images_hits, images_misses, ((long double) images_hits / (long double) images_misses));
     printf("diffs  | hits: %lu, misses: %lu, ratio: %.2Lf\n", diffs_hits, diffs_misses, ((long double) diffs_hits / (long double) diffs_misses));
 
-    delete_cache(cache_info);
+    destroy_cache(cache_info);
 
-    delete_db_info(db_info);
-
-    PQfinish(conn);
+    destroy_db_info(db_info);
 
     return 0;
 }

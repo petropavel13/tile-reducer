@@ -88,7 +88,7 @@ void read_tiles_paths(const char* path,
     }
 }
 
-void delete_tile_file(TileFile* tile_file) {
+void tile_file_destructor(TileFile* tile_file) {
     free(tile_file->data);
     free(tile_file);
 }
@@ -206,4 +206,10 @@ void calc_diff_one_with_many(const Tile* const left_tile,
     }
 
     free(right_tiles_pixels);
+}
+
+void tile_destructor(void* data) {
+    Tile* const t = data;
+    tile_file_destructor(t->tile_file);
+    free(t);
 }

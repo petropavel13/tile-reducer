@@ -5,9 +5,6 @@ void make_persistent_groups(const DbInfo *const db_info,
                             const unsigned int total,
                             CacheInfo* const cache_info,
                             void (*callback)(unsigned int, unsigned int)) {
-    TreeInfo* const tree_info = (TreeInfo*)malloc(sizeof(TreeInfo));
-    tree_info->data_destructor = NULL;
-
     unsigned int* pg_ids = malloc(sizeof(unsigned int) * total);
     unsigned int t_ids_count;
 
@@ -47,7 +44,7 @@ void make_persistent_groups(const DbInfo *const db_info,
                             rest_count--;
                         }
                     }
-                    not_used = remove_node(not_used, equal_candidates[i]->tile_id, tree_info);
+                    not_used = remove_node(not_used, equal_candidates[i]->tile_id, NULL);
 
                 }
             }
@@ -63,11 +60,11 @@ void make_persistent_groups(const DbInfo *const db_info,
                     }
                 }
 
-                not_used = remove_node(not_used, equal_candidates[0]->tile_id, tree_info);
+                not_used = remove_node(not_used, equal_candidates[0]->tile_id, NULL);
             }
         }
 
-        not_used = remove_node(not_used, next_tile->tile_id, tree_info);
+        not_used = remove_node(not_used, next_tile->tile_id, NULL);
 
         rest_count--;
 
@@ -78,18 +75,12 @@ void make_persistent_groups(const DbInfo *const db_info,
     free(equal_candidates);
     free(results);
 
-    destroy_tree(not_used, tree_info);
-    free(tree_info);
+    destroy_tree(not_used, NULL);
 }
 
 void migrate_tile(GenericNode** from, GenericNode** to, const unsigned int tile_id) {
-    TreeInfo* const tree_info = (TreeInfo*)malloc(sizeof(TreeInfo));
-    tree_info->data_destructor = NULL;
-
     *to = insert(*to, tile_id, find(*from, tile_id)->data);
-    *from = remove_node(*from, tile_id, tree_info);
-
-    free(tree_info);
+    *from = remove_node(*from, tile_id, NULL);
 }
 
 void delete_tile_groups_sequence(TileGroupsSequence* const sequence) {
@@ -163,12 +154,6 @@ void clusterize(GenericNode* const all_tiles,
 
     TilesSequence* t_tiles_sequence = t_tiles_sequence_from_free;
 
-    TreeInfo* const tree_info_sequence = (TreeInfo*)malloc(sizeof(TreeInfo));
-    tree_info_sequence->data_destructor = &tile_sequence_destructor;
-
-    TreeInfo* tree_info_dummy = (TreeInfo*)malloc(sizeof(TreeInfo));
-    tree_info_dummy->data_destructor = NULL;
-
     GenericNode* related_tiles = NULL;
 
     unsigned int* const related_ids = (unsigned int*)malloc(sizeof(unsigned int) * working_set_count);
@@ -184,7 +169,7 @@ void clusterize(GenericNode* const all_tiles,
 
         if(t_related_sequence == NULL) {
             working_set_count--;
-            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, tree_info_dummy);
+            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, NULL);
         } else {
             clean_related_group(t_tiles_sequence->tile, &t_related_sequence, related_count, max_diff_pixels, cache_info);
             related_tiles = insert(related_tiles, t_tiles_sequence->tile->tile_id, t_related_sequence);
@@ -208,8 +193,8 @@ void clusterize(GenericNode* const all_tiles,
 
         if(t_related_sequence == NULL) {
             working_set_count--;
-            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, tree_info_dummy);
-            related_tiles = remove_node(related_tiles, t_tiles_sequence->tile->tile_id, tree_info_sequence);
+            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, NULL);
+            related_tiles = remove_node(related_tiles, t_tiles_sequence->tile->tile_id, &tile_sequence_destructor);
         }
 
         t_tiles_sequence = t_tiles_sequence->next;
@@ -253,12 +238,10 @@ void clusterize(GenericNode* const all_tiles,
     delete_tile_groups_sequence(tile_group_sequence);
     delete_binded_tiles_sequence(binded_tiles_sequence);
 
-    destroy_tree(free_tiles, tree_info_dummy);
-    destroy_tree(used_tiles, tree_info_dummy);
-    destroy_tree(related_tiles, tree_info_sequence);
+    destroy_tree(free_tiles, NULL);
+    destroy_tree(used_tiles, NULL);
+    destroy_tree(related_tiles, &tile_sequence_destructor);
 
-    free(tree_info_sequence);
-    free(tree_info_dummy);
 
     delete_tiles_sequence(t_tiles_sequence_from_free);
 }

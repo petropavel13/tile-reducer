@@ -1,6 +1,6 @@
 #include "db_utils.h"
 
-DbInfo* init_db_info(PGconn* conn, size_t pg_sql_buffer_size) {
+DbInfo* create_db_info(PGconn* conn, size_t pg_sql_buffer_size) {
     DbInfo* db_info = malloc(sizeof(DbInfo));
     db_info->conn = conn;
     db_info->db_buffer = malloc(sizeof(DbBuffer));
@@ -366,9 +366,10 @@ void reduce_persistent_tiles_groups(const DbInfo* const db_info) {
     exec_no_result(db_info, reduce_persistent_tiles_groups_sql);
 }
 
-void delete_db_info(DbInfo *const db_info) {
+void destroy_db_info(DbInfo *const db_info) {
     free(db_info->db_buffer->buffer_str);
     free(db_info->db_buffer);
+    PQfinish(db_info->conn);
     free(db_info);
 }
 

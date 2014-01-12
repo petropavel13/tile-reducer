@@ -11,32 +11,58 @@ typedef struct TileColor {
     unsigned int repeat_count;
 } TileColor;
 
-typedef struct TilesTree {
+typedef struct TilesColorsTree {
     GenericNode* root_node;
-    TreeInfo* tree_info;
-} TilesTree;
+    unsigned long colors_count;
 
-TilesTree* init_tiles_tree(void);
+    unsigned long tiles_count;
 
-void index_tile(const Tile* const tile,
-                TilesTree *const tiles_tree);
+    void(*index_callback)(unsigned char);
+    unsigned long current_index;
+    unsigned char last_index_persent;
+
+    void(*flush_callback)(unsigned char);
+    unsigned long current_flush;
+    unsigned char last_flush_persent;
+
+    DbInfo* db_info;
+} TilesColorsTree;
+
+typedef struct TCTParams {
+    GenericNode* tiles_tree;
+    void(*index_callback)(unsigned char);
+    void(*flush_callback)(unsigned char);
+
+    DbInfo* db_info;
+} TCTParams;
 
 
-TileColor* create_or_get_tile_color(unsigned int tile_id, unsigned int color, TilesTree* tiles_tree);
-TileColor* create_tile_color(unsigned int tile_id, unsigned int color);
+TCTParams make_tct_params(GenericNode * const tiles_tree,
+                          void(*index_callback)(unsigned char),
+                          void(*flush_callback)(unsigned char),
+                          DbInfo* const db_info);
 
-void destroy_tile_color_tree(TilesTree* tiles_tree);
+TilesColorsTree* create_tiles_colors_tree(const GenericNode* const tiles_tree,
+                                          DbInfo * const db_info,
+                                          void(*index_callback)(unsigned char),
+                                          void(*flush_callback)(unsigned char));
 
-void flush_tiles_colors_tree(TilesTree *const tiles_tree,
-                             const DbInfo* const db_info,
-                             void (*callback)(unsigned char));
+void* index_tree_and_flush_result(void* arg);
+void index_tree(TilesColorsTree* const tiles_colors_tree, const GenericNode* const tiles_tree);
 
-void flush_tiles_colors_node(const GenericNode* const tile_color_node,
-                             const DbInfo* const db_info,
-                             const unsigned long *const total,
-                             unsigned long *const current,
-                             unsigned char* const last_percent,
-                             void (*callback)(unsigned char));
+void index_tile(TilesColorsTree *const tiles_tree, const Tile* const tile);
+
+
+TileColor* create_or_get_tile_color(const unsigned int tile_id,
+                                    const unsigned int color,
+                                    TilesColorsTree * const tiles_tree);
+TileColor* create_tile_color(const unsigned int tile_id, const unsigned int color);
+
+void destroy_tile_color_tree(TilesColorsTree* tiles_tree);
+
+void flush_tiles_colors_tree(TilesColorsTree *const tiles_colors_tree);
+
+void flush_tiles_colors_node(const GenericNode* const tile_color_node, TilesColorsTree * const tiles_colors_tree);
 
 void tile_color_destructor(void* data);
 

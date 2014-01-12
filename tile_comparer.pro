@@ -29,7 +29,7 @@ HEADERS += \
 
 INCLUDEPATH += "/usr/include/postgresql"
 
-LIBS += -lpq
+LIBS += -lpq -pthread
 
 QMAKE_CFLAGS = -std=c99 -D_BSD_SOURCE # for(int i=0), DT_DIR
 

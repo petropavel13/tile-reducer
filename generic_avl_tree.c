@@ -114,25 +114,25 @@ GenericNode* remove_min(GenericNode* const p) // удаление узла с м
     return balance(p);
 }
 
-GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo* const tree_info)
+GenericNode* remove_node(GenericNode* const p, unsigned long key, void (*data_destructor)(void *))
 {
     if( p == NULL ) {
         return NULL;
     }
 
     if( key < p->key ) {
-        p->left = remove_node(p->left, key, tree_info);
+        p->left = remove_node(p->left, key, data_destructor);
     }
     else if( key > p->key ) {
-        p->right = remove_node(p->right, key, tree_info);
+        p->right = remove_node(p->right, key, data_destructor);
     }
     else //  k == p->key
     {
         GenericNode* q = p->left;
         GenericNode* const r = p->right;
 
-        if(tree_info->data_destructor != NULL) { // NULL means data must be untouched
-            tree_info->data_destructor(p->data);
+        if(data_destructor != NULL) { // NULL means data must be untouched
+            data_destructor(p->data);
         }
 
         free(p);
@@ -151,15 +151,15 @@ GenericNode* remove_node(GenericNode* const p, unsigned long key, const TreeInfo
     return balance(p);
 }
 
-void destroy_tree(GenericNode *const root_node, const TreeInfo* const tree_info) {
+void destroy_tree(GenericNode *const root_node, void (*data_destructor)(void *)) {
     GenericNode* node = root_node;
 
     if(node != NULL) {
-        destroy_tree(node->left, tree_info);
-        destroy_tree(node->right, tree_info);
+        destroy_tree(node->left, data_destructor);
+        destroy_tree(node->right, data_destructor);
 
-        if(tree_info->data_destructor != NULL) { // NULL means data must be untouched
-            tree_info->data_destructor(root_node->data);
+        if(data_destructor != NULL) { // NULL means data must be untouched
+            data_destructor(root_node->data);
         }
 
         free(node);
@@ -172,14 +172,4 @@ void calc_elements_count(const GenericNode* const node, unsigned long *const cou
         calc_elements_count(node->left, count);
         calc_elements_count(node->right, count);
     }
-}
-
-void avl_shallow_copy(const GenericNode* const src, GenericNode ** const dest) {
-    if(src == NULL)
-        return;
-
-    *dest = insert(*dest, src->key, src->data);
-
-    avl_shallow_copy(src->left, dest);
-    avl_shallow_copy(src->right, dest);
 }
