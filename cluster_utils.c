@@ -5,27 +5,28 @@ void make_persistent_groups(const DbInfo *const db_info,
                             const unsigned int total,
                             CacheInfo* const cache_info,
                             void (*callback)(unsigned int, unsigned int)) {
-    unsigned int* pg_ids = malloc(sizeof(unsigned int) * total);
-    unsigned int t_ids_count;
+    unsigned int* pg_ids = NULL;
+    unsigned int t_ids_count = 0;
 
-    load_zero_equals_ids_leaders(db_info, pg_ids, &t_ids_count);
+    const Tile* next_tile = NULL;
 
-    GenericNode* not_used = create_tiles_tree_from_tiles_ids(tiles_root_node, pg_ids, t_ids_count);
-
-    Tile* next_tile = NULL;
     const Tile** const equal_candidates = (const Tile**)malloc(sizeof(Tile*) * total); // prevent many malloc/free calls
 
     unsigned short int* const results = malloc(sizeof(unsigned short int) * total); // prevent many malloc/free calls
 
-    unsigned int rest_count = t_ids_count;
+    unsigned int processed_count = 0;
 
-    while(not_used != NULL) {
-        next_tile = (Tile*) not_used->data;
+    unsigned int passed_ids_count = 0;
 
-        load_zero_equals_ids_for_tile(db_info, next_tile->tile_id, pg_ids, &t_ids_count);
+    const GenericNode* t_next_node = find(tiles_root_node, load_next_zero_equal_id_leader(db_info));
+
+    while(t_next_node != NULL) {
+        next_tile = t_next_node->data;
+
+        load_zero_equals_ids_for_tile(db_info, next_tile->tile_id, &pg_ids, &t_ids_count);
 
         if(callback != NULL) {
-            callback(rest_count, t_ids_count);
+            callback(processed_count, t_ids_count);
         }
 
         for (unsigned int i = 0; i < t_ids_count; ++i) {
@@ -37,45 +38,43 @@ void make_persistent_groups(const DbInfo *const db_info,
 
             for (unsigned int i = 0; i < t_ids_count; ++i) {
                 if(results[i] == 0) {
-                    add_tile_to_persistent_group_using_buffer(db_info, equal_candidates[i]->tile_id, next_tile->tile_id);
-
-                    if(callback != NULL) {
-                        if(find(not_used, equal_candidates[i]->tile_id) != NULL) {
-                            rest_count--;
-                        }
-                    }
-                    not_used = remove_node(not_used, equal_candidates[i]->tile_id, NULL);
-
+                    add_tile_to_persistent_group_using_buffer(db_info, next_tile->tile_id, equal_candidates[i]->tile_id);
+                    pg_ids[passed_ids_count++] = equal_candidates[i]->tile_id; // reuse pg_ids
                 }
             }
 
-            flush_db_buffer(db_info);
+            flush_db_buffer(db_info); // add to persistent_groups
+
+            for (unsigned int i = 0; i < passed_ids_count; ++i) {
+                delete_zero_equal_pair_using_buffer(db_info, next_tile->tile_id, pg_ids[i]);
+            }
+
+            flush_db_buffer(db_info); // delete from count_equality_mv
+
+            if(passed_ids_count != t_ids_count) {
+                remix_zero_equals_ids(db_info, next_tile->tile_id);
+            }
+
+            passed_ids_count = 0;
         } else if(t_ids_count == 1) {  // compare 1 to 1 (use simpler functions)
+            delete_zero_equal_pair(db_info, next_tile->tile_id, equal_candidates[0]->tile_id);
+
             if(calc_diff(next_tile, equal_candidates[0], cache_info) == 0) {
                 add_tile_to_persistent_group(db_info, equal_candidates[0]->tile_id, next_tile->tile_id);
-
-                if(callback != NULL) {
-                    if(find(not_used, equal_candidates[0]->tile_id) != NULL) {
-                        rest_count--;
-                    }
-                }
-
-                not_used = remove_node(not_used, equal_candidates[0]->tile_id, NULL);
             }
         }
 
-        not_used = remove_node(not_used, next_tile->tile_id, NULL);
+        free(pg_ids); pg_ids = NULL;
 
-        rest_count--;
+        processed_count++;
 
         t_ids_count = 0;
+
+        t_next_node = find(tiles_root_node, load_next_zero_equal_id_leader(db_info));
     }
 
-    free(pg_ids);
     free(equal_candidates);
     free(results);
-
-    destroy_tree(not_used, NULL);
 }
 
 void migrate_tile(GenericNode** from, GenericNode** to, const unsigned int tile_id) {
@@ -263,7 +262,7 @@ void clean_related_group(const Tile* const tile,
 
         unsigned short int* const diff_results = (unsigned short int*)malloc(sizeof(unsigned short int) * related_sequence_count);
 
-        calc_diff_one_with_many(tile, related_tiles_for_tile, related_sequence_count, cache_info, diff_results);
+        calc_diff_one_with_many(tile, (const Tile* const * const)related_tiles_for_tile, related_sequence_count, cache_info, diff_results);
 
 
         TilesSequence* new_sequence_first = (TilesSequence*)malloc(sizeof(TilesSequence));

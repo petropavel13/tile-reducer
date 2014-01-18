@@ -27,7 +27,8 @@ HEADERS += \
     generic_avl_tree.h \
     color_index_utils.h
 
-INCLUDEPATH += "/usr/include/postgresql"
+INCLUDEPATH += "/usr/include/postgresql" \
+               "/usr/include/postgresql-9.3/"
 
 LIBS += -lpq -pthread
 

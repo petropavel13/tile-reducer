@@ -12,7 +12,7 @@
 #define DEFAULT_MB_IMAGE_CACHE_SIZE 512
 #define DEFAULT_MB_DIFF_CACHE_SIZE 128
 #define DEFAULT_MB_PG_SQL_BUFFER_SIZE 8
-#define DEFAULT_NUM_THREADS 8
+#define DEFAULT_NUM_THREADS 4
 
 #define LEFT 0
 #define RIGHT 1
@@ -64,7 +64,7 @@ void print_make_persistent_groups(const unsigned int current, const unsigned int
 GenericNode* get_head(const GenericNode* const tiles_node, const unsigned char current_level, const unsigned char path) {
     const unsigned char direction = ((unsigned char)((path >> current_level) << 7)) >> 7;
 
-    const GenericNode* const next_tree_node = direction == LEFT ? tiles_node->left : tiles_node->right;
+    GenericNode* const next_tree_node = direction == LEFT ? tiles_node->left : tiles_node->right;
 
     return current_level == 0 ? next_tree_node : get_head(next_tree_node, current_level - 1, path);
 }
@@ -88,7 +88,7 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
 
     for (unsigned char i = 0; i < num_threads; ++i) {
         heads[i] = get_head(tiles_tree, num_threads >> 2, i);
-        connections[i] = create_db_info(PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123"), 1024 * 1024 * 1);
+        connections[i] = create_db_info(PQconnectdb("dbname=tiles_db hostaddr=192.168.0.108 user=postgres port=5432 password=123"), 1024 * 1024 * 1);
 //        th_params[i] = make_tct_params(heads[i], NULL, NULL, connections[i]);
         th_params[i] = make_tct_params(heads[i], &print_progress_index_colors, &print_progress_tiles_colors_db_write, connections[i]);
         pthread_create(&threads[i], NULL, &index_tree_and_flush_result, &th_params[i]);
@@ -138,7 +138,7 @@ int main(int argc, char* argv [])
     printf("\rTotal tiles count: %d         \n", total);
     fflush(stdout);
 
-    PGconn* const conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.39 user=postgres port=5432 password=123");
+    PGconn* const conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.108 user=postgres port=5432 password=123");
 //    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=123");
 //    PGconn* conn = PQconnectdb("dbname=tiles_db host=/var/run/postgresql user=postgres password=123");
 
@@ -169,7 +169,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-    clear_all_data(db_info);
+//    clear_all_data(db_info);
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
@@ -241,6 +241,8 @@ int main(int argc, char* argv [])
     free(tiles_paths);
 
     if(res != TILES_ALREADY_EXISTS) {
+        drop_index_tile_color(db_info);
+
         if (max_num_threads < 2) {
             TCTParams params = make_tct_params(all_tiles, &print_progress_index_colors, &print_progress_tiles_colors_db_write, db_info);
             index_tree_and_flush_result(&params);
@@ -251,6 +253,8 @@ int main(int argc, char* argv [])
 //            printf("\rIndexing and writing tiles color %u threads...done\n", max_num_threads);
             fflush(stdout);
         }
+
+        create_index_tile_color(db_info);
 
         printf("\r                                                ");
         printf("\rMaterializing count equality view...");
@@ -266,12 +270,6 @@ int main(int argc, char* argv [])
 
         printf("\r                                                ");
         printf("\rMaking persistent groups...done\n");
-        fflush(stdout);
-
-        printf("Reducing persistent groups...");
-        fflush(stdout);
-        reduce_persistent_tiles_groups(db_info);
-        printf("done\n");
         fflush(stdout);
     }
 

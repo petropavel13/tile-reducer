@@ -68,9 +68,9 @@ void tile_color_destructor(void* data);
 
 static inline unsigned int calc_color(unsigned char* rgba_color) {
     return (((unsigned int) rgba_color[0]) << 24) +
-            ((unsigned int) (rgba_color[1]) << 16) +
-            ((unsigned int) (rgba_color[2]) << 8) +
-            (unsigned int) rgba_color[3];
+           (((unsigned int) rgba_color[1]) << 16) +
+           (((unsigned int) rgba_color[2]) << 8) +
+           (((unsigned int) rgba_color[3] << 0));
 }
 
 #endif // COLOR_INDEX_UTILS_H

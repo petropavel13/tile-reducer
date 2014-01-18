@@ -135,13 +135,9 @@ void destroy_tile_color_tree(TilesColorsTree* tiles_tree) {
 void flush_tiles_colors_tree(TilesColorsTree* const tiles_colors_tree) {
     tiles_colors_tree->root_node = remove_node(tiles_colors_tree->root_node, 0, &tile_color_destructor);
 
-    drop_index_tile_color(tiles_colors_tree->db_info);
-
     flush_tiles_colors_node(tiles_colors_tree->root_node, tiles_colors_tree);
 
     flush_db_buffer(tiles_colors_tree->db_info);
-
-    create_index_tile_color(tiles_colors_tree->db_info);
 }
 
 void flush_tiles_colors_node(const GenericNode* const tile_color_node, TilesColorsTree* const tiles_colors_tree) {
