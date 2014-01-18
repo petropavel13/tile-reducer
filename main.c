@@ -14,9 +14,27 @@
 #define DEFAULT_MB_PG_SQL_BUFFER_SIZE 8
 #define DEFAULT_NUM_THREADS 4
 
+#define STRINGS_EQUAL 0
+
 #define LEFT 0
 #define RIGHT 1
 //#define DEBUG 1
+
+char* get_arg(const int argc, char** argv, const char* const key) {
+    int i = 0;
+
+    for(; i < argc; ++i) {
+        if (strstr(argv[i], key) != NULL) {
+            if (strchr(argv[i], '=') != NULL) {
+                return &(argv[i][strlen(key) + 1]);
+            } else {
+                return "true";
+            }
+        }
+    }
+
+    return "false";
+}
 
 void print_progress_paths_read(const unsigned char percent_done) {
     printf("\r                            ");
@@ -111,24 +129,41 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
     }
 }
 
+void print_help() {
+    printf("template: ./comparer --path=/path/to/tiles/folder/ --max_diff_pixels=0...65535 [--max_mb_cache=] [--max_num_theads=]\n");
+    printf("example: ./comparer --path=/tiles/opt_easy/ --max_diff_pixels=16 --max_mb_cache=4096 --max_threads=8\n");
+    printf("example: ./comparer --path=/tiles/opt_easy/ --max_diff_pixels=64\n");
+}
+
 
 int main(int argc, char* argv [])
 {
-    if(argc < 2) {
-        printf("-- too few parameters! --\n");
-        printf("template: ./comparer /path/to/tiles/folder/ MAX_DIFF_PIXELS [MAX_MB_CACHE] [MAX_NUM_THREADS]\n");
-        printf("example: ./comparer /tiles/opt_easy/ 16 4096\n");
-        printf("example: ./comparer /tiles/opt_easy/ 64\n");
+    const char* const path = get_arg(argc, argv, "--path");
+    const char* const max_diff_pixels_param = get_arg(argc, argv, "--max_diff_pixels");
 
+    if (strcmp(path, "false") == STRINGS_EQUAL || strcmp(max_diff_pixels_param, "false") == STRINGS_EQUAL) {
+        print_help();
         return 1;
     }
 
-    const char* path = argv[1];
-    const unsigned short int max_diff_pixels = atoi(argv[2]);
-    const size_t max_cache_size_bytes = (argc > 3) ? ((size_t) atoi(argv[3])) * 1024 * 1024 : ((size_t) DEFAULT_MB_IMAGE_CACHE_SIZE) * 1024 * 1024;
-    const unsigned char max_num_threads = (argc > 4) ? atoi(argv[4]) : DEFAULT_NUM_THREADS;
+    const unsigned short int max_diff_pixels = atoi(max_diff_pixels_param);
+    const char* const max_cache_size_param = get_arg(argc, argv, "--max_mb_cache");
 
-    printf("Tiles folder: \"%s\";\nmax_diff_pixels: %d;\ncache_size: %d MB;\n\n", path, max_diff_pixels, (unsigned int) (max_cache_size_bytes / 1024 / 1024));
+    const size_t max_cache_size_bytes = strcmp(max_cache_size_param, "false") != STRINGS_EQUAL ?
+                ((size_t) atoi(max_cache_size_param)) * 1024 * 1024 :
+                ((size_t) DEFAULT_MB_IMAGE_CACHE_SIZE) * 1024 * 1024;
+
+
+    const char* const max_threads_param = get_arg(argc, argv, "--max_threads");
+
+    const unsigned char max_num_threads = strcmp(max_threads_param, "false") != STRINGS_EQUAL ? atoi(max_threads_param) : DEFAULT_NUM_THREADS;
+
+    printf("Tiles folder: \"%s\"\nmax_diff_pixels: %u\ncache_size: %u MB\nmax_threads: %u\n",
+                          path,
+                          max_diff_pixels,
+                          (unsigned int) (max_cache_size_bytes / 1024 / 1024),
+                          (unsigned int) max_num_threads
+        );
 
     printf("Computing tiles count...");
     fflush(stdout);
