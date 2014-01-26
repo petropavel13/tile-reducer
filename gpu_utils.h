@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 
-typedef enum TaskStatus{
+typedef enum TaskStatus {
     TASK_DONE,
     TASK_FAILED
 } TaskStatus;

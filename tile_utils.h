@@ -18,25 +18,37 @@
 
 #define USHORT_MAX 65535
 
-typedef struct TileFile
-{
+typedef struct TileFile {
     unsigned char* data;
     size_t size_bytes;
 } TileFile;
 
 
-typedef struct Tile
-{
+typedef struct Tile {
     unsigned int tile_id;
     TileFile* tile_file;
 } Tile;
 
+typedef struct CompareBackend {
+    unsigned short (*one_with_one_func)(const unsigned char* const,
+                                        const unsigned char* const);
+
+    TaskStatus (*one_with_many_func)(const unsigned char* const,
+                               const unsigned char* const,
+                               const unsigned int,
+                               unsigned short* const);
+} CompareBackend;
+
+
+typedef enum CompareBackendType { CPU, CUDA_GPU } CompareBackendType;
+
+CompareBackend make_backend(CompareBackendType type, const unsigned int count);
 
 TileFile* read_tile(const char* file_path);
 
-unsigned int get_tile_pixels(const TileFile* tile, unsigned char** pixels);
+unsigned int get_tile_pixels(const TileFile * const tile, unsigned char** const pixels);
 
-unsigned int get_total_files_count(const char* path);
+unsigned int get_total_files_count(const char * const path);
 
 void read_tiles_paths(const char* path,
                       char **const paths,
@@ -47,11 +59,17 @@ void read_tiles_paths(const char* path,
 
 void tile_file_destructor(TileFile* tile_file);
 
-unsigned short compare_images_cpu(const unsigned char * const raw_left_image, const unsigned char * const raw_right_image);
+unsigned short compare_images_one_with_one_cpu(const unsigned char * const raw_left_image,
+                                               const unsigned char * const raw_right_image);
+
+TaskStatus compare_images_one_with_many_cpu(const unsigned char* const left_raw_image,
+                                      const unsigned char* const right_raw_images,
+                                      const unsigned int right_images_count,
+                                      unsigned short* const diff_results);
 
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
-                 unsigned char** pixels);
+                 unsigned char ** const pixels);
 
 unsigned int calc_diff(const Tile* const left_node,
                        const Tile* const right_node,

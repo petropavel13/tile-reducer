@@ -14,14 +14,14 @@ TileFile* read_tile(const char* file_path) {
 }
 
 
-unsigned int get_tile_pixels(const TileFile* tile, unsigned char** pixels) {
+unsigned int get_tile_pixels(const TileFile* const tile, unsigned char** const pixels) {
     unsigned int width, height;
 
     return lodepng_decode32(pixels, &width, &height, tile->data, tile->size_bytes);
 }
 
 
-unsigned int get_total_files_count(const char* path) {
+unsigned int get_total_files_count(const char* const path) {
     DIR* dir = NULL;
     struct dirent *entry;
 
@@ -33,7 +33,7 @@ unsigned int get_total_files_count(const char* path) {
                 if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
                     continue;
 
-                char inner_path[255];
+                char inner_path[strlen(path) + strlen(entry->d_name + 1)];
                 sprintf(inner_path, "%s%s/", path, entry->d_name);
 
                 count += get_total_files_count(inner_path);
@@ -93,7 +93,8 @@ void tile_file_destructor(TileFile* tile_file) {
     free(tile_file);
 }
 
-unsigned short compare_images_cpu(const unsigned char * const raw_left_image, const unsigned char * const raw_right_image) {
+unsigned short compare_images_one_with_one_cpu(const unsigned char * const raw_left_image,
+                                               const unsigned char * const raw_right_image) {
     unsigned int res = 0;
 
     for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
@@ -106,9 +107,20 @@ unsigned short compare_images_cpu(const unsigned char * const raw_left_image, co
     return (unsigned short) (res > USHORT_MAX ? USHORT_MAX : res);
 }
 
+TaskStatus compare_images_one_with_many_cpu(const unsigned char * const left_raw_image,
+                                      const unsigned char * const right_raw_images,
+                                      const unsigned int right_images_count,
+                                      unsigned short * const diff_results) {
+    for (unsigned int i = 0; i < right_images_count; ++i) {
+        diff_results[i] = compare_images_one_with_one_cpu(left_raw_image, &right_raw_images[i * TILE_SIZE_BYTES]);
+    }
+
+    return TASK_DONE;
+}
+
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
-                 unsigned char **pixels) {
+                 unsigned char ** const pixels) {
     const CacheSearchResult cache_res = get_tile_data(tile->tile_id, cache_info, pixels);
 
     if(cache_res == CACHE_MISS) {
@@ -117,7 +129,7 @@ void load_pixels(const Tile* const tile,
         if(read_res == 0) {
             push_image_to_cache(tile->tile_id, *pixels, cache_info);
         } else {
-            printf("\n\nproblem while loading tile with id: %d\n\n", tile->tile_id);
+            printf("\n\nproblem while loading tile with id: %d!\n\n", tile->tile_id);
             fflush(stdout);
         }
     }
@@ -129,9 +141,7 @@ unsigned int calc_diff(const Tile* const left_node,
     unsigned short diff_result;
     const unsigned long key = make_key(left_node->tile_id, right_node->tile_id);
 
-    const CacheSearchResult cache_res = get_diff_from_cache(key, cache_info, &diff_result);
-
-    if(cache_res  == CACHE_HIT) {
+    if(get_diff_from_cache(key, cache_info, &diff_result) == CACHE_HIT) {
         return diff_result;
     }
 
@@ -141,7 +151,9 @@ unsigned int calc_diff(const Tile* const left_node,
     unsigned char* right_tile_pixels = NULL;
     load_pixels(right_node, cache_info, &right_tile_pixels);
 
-    diff_result = compare_images_cpu(left_tile_pixels, right_tile_pixels);
+    const CompareBackend cb = make_backend(CPU, 1);
+
+    diff_result = cb.one_with_one_func(left_tile_pixels, right_tile_pixels);
     push_edge_to_cache(key, diff_result, cache_info);
 
     return diff_result;
@@ -162,7 +174,9 @@ void calc_diff_one_with_many(const Tile* const left_tile,
 
     unsigned char* temp_right_tile_pixels = NULL;
 
-    TaskStatus compare_res = 0;
+    TaskStatus status = 0;
+
+    const CompareBackend cb = make_backend(right_tiles_count > 32 ? CUDA_GPU : CPU, right_tiles_count);
 
     while (rest_count > TILE_SIZE_BUFFER) {
         for (unsigned int i = 0; i < TILE_SIZE_BUFFER; ++i) {
@@ -170,11 +184,11 @@ void calc_diff_one_with_many(const Tile* const left_tile,
             memcpy(&right_tiles_pixels[i * TILE_SIZE_BYTES], temp_right_tile_pixels, TILE_SIZE_BYTES);
         }
 
-        compare_res = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, TILE_SIZE_BUFFER, &(results[current]));
-//        compare_res = compare_one_image_with_others_streams(left_tile_pixels, right_tiles_pixels, TILE_SIZE_BUFFER, &(results[current]));
+        status = cb.one_with_many_func(left_tile_pixels, right_tiles_pixels, TILE_SIZE_BUFFER, &(results[current]));
+//        status = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, TILE_SIZE_BUFFER, &(results[current]));
 
-        if(compare_res == TASK_FAILED) {
-            printf("\n\nGPU TASK FAILED\n\n");
+        if(status == TASK_FAILED) {
+            printf("\n\nTASK FAILED!\n\n");
             fflush(stdout);
 
             return;
@@ -193,11 +207,11 @@ void calc_diff_one_with_many(const Tile* const left_tile,
         memcpy(&right_tiles_pixels[i * TILE_SIZE_BYTES], temp_right_tile_pixels, TILE_SIZE_BYTES);
     }
 
-    compare_res = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, rest_count, &(results[current]));
-//    compare_res = compare_one_image_with_others_streams(left_tile_pixels, right_tiles_pixels, rest_count, &(results[current]));
+    status = cb.one_with_many_func(left_tile_pixels, right_tiles_pixels, rest_count, &(results[current]));
+//    status = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, rest_count, &(results[current]));
 
-    if(compare_res == TASK_FAILED) {
-        printf("\n\nGPU TASK FAILED\n\n");
+    if(status == TASK_FAILED) {
+        printf("\n\nTASK FAILED!\n\n");
         fflush(stdout);
 
         return;
@@ -215,3 +229,26 @@ void tile_destructor(void* data) {
     tile_file_destructor(t->tile_file);
     free(t);
 }
+
+
+CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
+    CompareBackend cb = { NULL, NULL };
+
+    if (type == CPU) {
+        cb.one_with_one_func = &compare_images_one_with_one_cpu;
+        cb.one_with_many_func = &compare_images_one_with_many_cpu;
+    } else if(type == CUDA_GPU) {
+//        cb.one_with_one_func = &compare_one_image_with_others;
+
+        if (count < get_max_tiles_count_per_stream()) {
+            cb.one_with_many_func = &compare_one_image_with_others;
+        } else {
+            cb.one_with_many_func = &compare_one_image_with_others_streams;
+        }
+    }
+
+    return cb;
+}
+
+
+
