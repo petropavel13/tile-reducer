@@ -68,7 +68,7 @@ void read_tiles_paths(const char* path,
 
                 read_tiles_paths(inner_path, paths, total, current, last_percent, callback);
             } else {
-                char* inner_path = malloc(sizeof(char) * (strlen(path) + strlen(entry->d_name) + 1));
+                char* const inner_path = malloc(sizeof(char) * (strlen(path) + strlen(entry->d_name) + 1));
                 sprintf(inner_path, "%s%s", path, entry->d_name);
 
                 paths[(*current)++] = inner_path;
@@ -93,7 +93,7 @@ void tile_file_destructor(TileFile* tile_file) {
     free(tile_file);
 }
 
-unsigned short compare_images_cpu(unsigned char * const raw_left_image, unsigned char * const raw_right_image) {
+unsigned short compare_images_cpu(const unsigned char * const raw_left_image, const unsigned char * const raw_right_image) {
     unsigned int res = 0;
 
     for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
@@ -109,7 +109,7 @@ unsigned short compare_images_cpu(unsigned char * const raw_left_image, unsigned
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
                  unsigned char **pixels) {
-    const unsigned char cache_res = get_tile_data(tile->tile_id, cache_info, pixels);
+    const CacheSearchResult cache_res = get_tile_data(tile->tile_id, cache_info, pixels);
 
     if(cache_res == CACHE_MISS) {
         const unsigned int read_res = get_tile_pixels(tile->tile_file, pixels);
@@ -129,7 +129,7 @@ unsigned int calc_diff(const Tile* const left_node,
     unsigned short diff_result;
     const unsigned long key = make_key(left_node->tile_id, right_node->tile_id);
 
-    const unsigned char cache_res = get_diff_from_cache(key, cache_info, &diff_result);
+    const CacheSearchResult cache_res = get_diff_from_cache(key, cache_info, &diff_result);
 
     if(cache_res  == CACHE_HIT) {
         return diff_result;
@@ -162,7 +162,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
 
     unsigned char* temp_right_tile_pixels = NULL;
 
-    unsigned int compare_res = 0;
+    TaskStatus compare_res = 0;
 
     while (rest_count > TILE_SIZE_BUFFER) {
         for (unsigned int i = 0; i < TILE_SIZE_BUFFER; ++i) {
@@ -171,6 +171,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
         }
 
         compare_res = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, TILE_SIZE_BUFFER, &(results[current]));
+//        compare_res = compare_one_image_with_others_streams(left_tile_pixels, right_tiles_pixels, TILE_SIZE_BUFFER, &(results[current]));
 
         if(compare_res == TASK_FAILED) {
             printf("\n\nGPU TASK FAILED\n\n");
@@ -193,6 +194,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
     }
 
     compare_res = compare_one_image_with_others(left_tile_pixels, right_tiles_pixels, rest_count, &(results[current]));
+//    compare_res = compare_one_image_with_others_streams(left_tile_pixels, right_tiles_pixels, rest_count, &(results[current]));
 
     if(compare_res == TASK_FAILED) {
         printf("\n\nGPU TASK FAILED\n\n");

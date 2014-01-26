@@ -23,7 +23,7 @@ CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_tree_n
 }
 
 
-unsigned char get_tile_data(unsigned int tile_id,
+CacheSearchResult get_tile_data(unsigned int tile_id,
                             CacheInfo* const cache_info,
                             unsigned char** const tile_data) {
     GenericNode* const current_images_root = cache_info->images_root_node;
@@ -45,7 +45,7 @@ unsigned char get_tile_data(unsigned int tile_id,
     }
 }
 
-unsigned char get_diff_from_cache(unsigned long key,
+CacheSearchResult get_diff_from_cache(unsigned long key,
                        CacheInfo *const cache_info,
                        unsigned short* const diff_pixels) {
     GenericNode* const current_edge_root = cache_info->edges_root_node;

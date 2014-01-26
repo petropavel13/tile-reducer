@@ -24,18 +24,22 @@ typedef struct CacheInfo
     unsigned long edges_miss_count;
 } CacheInfo;
 
-#define CACHE_HIT 1
-#define CACHE_MISS 2
+
+typedef enum CacheSearchResult {
+    CACHE_HIT,
+    CACHE_MISS
+} CacheSearchResult;
+
 
 CacheInfo* init_cache(size_t max_cache_size_images,
                       size_t max_cache_size_tree_nodes,
                       size_t tile_size_bytes);
 
-unsigned char get_tile_data(unsigned int tile_id,
+CacheSearchResult get_tile_data(unsigned int tile_id,
                             CacheInfo *const cache_info,
                             unsigned char **const tile_data);
 
-unsigned char get_diff_from_cache(unsigned long key,
+CacheSearchResult get_diff_from_cache(unsigned long key,
                        CacheInfo *const cache_info,
                        unsigned short *const diff_pixels);
 

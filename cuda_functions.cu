@@ -35,7 +35,7 @@ __global__ void sum_z_dimension_zero_or_one(unsigned char* cubes,
                                             unsigned char* matrices_results,
                                             size_t matrix_size_pitch) {
 
-    const unsigned short int y = threadIdx.y; // 0.256
+    const unsigned short int y = threadIdx.y; // 0..256
     const unsigned short int x = blockIdx.x * blockDim.x + threadIdx.x; // 0..256 -> 0..64 * 4 + 0..4
 
     const unsigned short int cube_number = blockIdx.y; // 0..256

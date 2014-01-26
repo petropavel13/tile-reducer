@@ -47,7 +47,7 @@ void read_tiles_paths(const char* path,
 
 void tile_file_destructor(TileFile* tile_file);
 
-unsigned short compare_images_cpu(unsigned char* const raw_left_image, unsigned char* const raw_right_image);
+unsigned short compare_images_cpu(const unsigned char * const raw_left_image, const unsigned char * const raw_right_image);
 
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,

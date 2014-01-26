@@ -130,7 +130,7 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
 }
 
 void print_help() {
-    printf("template: ./comparer --path=/path/to/tiles/folder/ --max_diff_pixels=0...65535 [--max_mb_cache=] [--max_num_theads=]\n");
+    printf("template: ./comparer --path=/path/to/tiles/folder/ --max_diff_pixels=0...65535 [--max_mb_cache=] [--max_num_theads=2^x -> (2,4,8,16,...)]\n");
     printf("example: ./comparer --path=/tiles/opt_easy/ --max_diff_pixels=16 --max_mb_cache=4096 --max_threads=8\n");
     printf("example: ./comparer --path=/tiles/opt_easy/ --max_diff_pixels=64\n");
 }
@@ -158,7 +158,13 @@ int main(int argc, char* argv [])
 
     const unsigned char max_num_threads = strcmp(max_threads_param, "false") != STRINGS_EQUAL ? atoi(max_threads_param) : DEFAULT_NUM_THREADS;
 
-    printf("Tiles folder: \"%s\"\nmax_diff_pixels: %u\ncache_size: %u MB\nmax_threads: %u\n",
+    if ((max_num_threads & (~max_num_threads + 1)) != max_num_threads) {
+        printf("max_threads must be power of 2!\n\n");
+        print_help();
+        return 1;
+    }
+
+    printf("Tiles folder: \"%s\"\nMax diff. pixels: %u\nCache size: %u MB\nMax threads: %u\n\n",
                           path,
                           max_diff_pixels,
                           (unsigned int) (max_cache_size_bytes / 1024 / 1024),
@@ -174,7 +180,7 @@ int main(int argc, char* argv [])
     fflush(stdout);
 
     PGconn* const conn = PQconnectdb("dbname=tiles_db hostaddr=192.168.0.108 user=postgres port=5432 password=123");
-//    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=123");
+//    PGconn* conn = PQconnectdb("dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=takeit4");
 //    PGconn* conn = PQconnectdb("dbname=tiles_db host=/var/run/postgresql user=postgres password=123");
 
     printf("Connecting to db...");
@@ -204,7 +210,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-//    clear_all_data(db_info);
+    clear_all_data(db_info);
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
@@ -218,7 +224,7 @@ int main(int argc, char* argv [])
         read_tiles_ids(db_info, pg_ids);
     } else if(res == NO_TILES_IN_DB) {
         clear_all_data(db_info); // reset sequences
-        write_tiles_paths(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        write_tiles_paths(db_info, (const char * const * const)tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
         printf("\rWriting tiles paths to DB...done\n");
@@ -228,7 +234,7 @@ int main(int argc, char* argv [])
         fflush(stdout);
 
         clear_all_data(db_info);
-        write_tiles_paths(db_info, tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        write_tiles_paths(db_info, (const char * const * const)tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
         printf("\rWriting tiles paths to DB...done\n");
@@ -308,10 +314,9 @@ int main(int argc, char* argv [])
         fflush(stdout);
     }
 
-//    return 0;
-
-
-    clusterize(all_tiles, total, max_diff_pixels, db_info, cache_info);
+    if (max_diff_pixels > 0) {
+        clusterize(all_tiles, total, max_diff_pixels, db_info, cache_info);
+    }
 
     destroy_tree(all_tiles, &tile_destructor);
 

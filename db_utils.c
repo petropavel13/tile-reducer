@@ -143,7 +143,6 @@ void create_tables_if_not_exists(const DbInfo* const db_info) {
 
 
     exec_no_result(db_info, create_tile_color_records_count_view);
-//    exec_no_result(db_info, create_count_equality_view_unordered);
 }
 
 void clear_all_data(const DbInfo* const db_info) {
@@ -155,8 +154,8 @@ void clear_session_data(const DbInfo* const db_info) {
 }
 
 void write_tiles_paths(const DbInfo* const db_info,
-                                    char **const paths,
-                                    unsigned int total_count,
+                                    const char * const * const paths,
+                                    const unsigned int total_count,
                                     unsigned int *const ids_in_pg,
                                     void (*callback) (unsigned int)) {
     PGresult *res = NULL;

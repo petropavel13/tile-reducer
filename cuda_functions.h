@@ -3,11 +3,11 @@
 
 #define USHORT_MAX 65535
 
-__device__ inline unsigned int index_in_3d(unsigned int x,
-                                        unsigned int x_size,
-                                        unsigned int y,
-                                        unsigned int z,
-                                        unsigned int z_size) {
+__host__ __device__ inline unsigned int index_in_3d(const unsigned int x,
+                                        const unsigned int x_size,
+                                        const unsigned int y,
+                                        const unsigned int z,
+                                        const unsigned int z_size) {
     return y * x_size * z_size + x * z_size + z;
 }
 
