@@ -95,9 +95,12 @@ void flush_db_buffer(const DbInfo* const db_info);
 
 
 void create_working_set(const DbInfo* const db_info);
+void create_working_set_wo_equality_records(const DbInfo* const db_info);
 void create_working_set_wo_persistent_records_w_max_diff(const DbInfo* const db_info, const unsigned short max_diff_pixels);
 
 unsigned int get_next_tile_from_working_set(const DbInfo* const db_info);
+
+void remove_tile_and_equals_tiles_from_working_set(const DbInfo* const db_info, const unsigned int tile_id);
 
 void materialize_count_equality(const DbInfo* const db_info);
 
@@ -253,12 +256,17 @@ static const char create_table_tile_color[] = "\
 
 
 static const char create_table_working_set[] = "\
-    CREATE TABLE working_set (\
-        tile_id integer NOT NULL,\
-        CONSTRAINT tile_id_fk FOREIGN KEY (tile_id)\
-            REFERENCES tiles (id) MATCH SIMPLE\
-            ON UPDATE CASCADE ON DELETE CASCADE\
-    );";
+    CREATE TABLE working_set ( \
+        tile_id integer NOT NULL, \
+        CONSTRAINT tile_id_fk FOREIGN KEY (tile_id) \
+            REFERENCES tiles (id) MATCH SIMPLE \
+            ON UPDATE CASCADE ON DELETE CASCADE \
+    ); \
+    \
+    CREATE INDEX working_set_tile_id_indx \
+        ON working_set \
+        USING btree \
+        (tile_id);";
 
 
 static const char create_tile_color_records_count_view[] = "\
@@ -311,34 +319,40 @@ static const char create_tile_color_count_mv_table[] = "\
       (count );";
 
 
-// Postgresql WITH keyword save memory and reduce execution time
 static const char materializations_of_count_equality_mv_sql_template[] = "\
-    INSERT INTO count_equality_mv (\
-        WITH matches AS\
-            (SELECT tile_id\
-            FROM tile_color_count_mv\
-            WHERE count = %u\
-            ORDER BY tile_id)\
-        \
-            SELECT\
-                (SELECT tile_id FROM matches LIMIT 1) AS left_tile_id,\
-                tile_id as right_tile_id\
-            FROM matches OFFSET 1);";
+    INSERT INTO count_equality_mv ( \
+        SELECT %u, tc1.tile_id \
+        FROM tile_color tc0 \
+        JOIN tile_color tc1 ON tc0.color = tc1.color \
+            AND tc0.repeat_count = tc1.repeat_count \
+            AND tc0.tile_id <> tc1.tile_id \
+        WHERE tc0.tile_id = %u \
+        GROUP BY tc1.tile_id \
+        HAVING COUNT(tc0.color) = (SELECT count FROM tile_color_count_mv WHERE tile_id = tc1.tile_id));";
 
+
+// For some reason EXISTS clause doesn't use indexes. That's sad.
+static const char remove_tile_and_equals_tiles_from_working_set_sql_template[] = "\
+    DELETE FROM working_set \
+    WHERE tile_id = %u \
+        OR tile_id IN (SELECT t.tile_id \
+                       FROM working_set t \
+                       JOIN count_equality_mv ce ON ce.left_tile_id = t.tile_id \
+                           OR ce.right_tile_id = t.tile_id);";
 
 static const char sql_template_remix_count_equality_mv[] = "\
-        INSERT INTO count_equality_mv (\
-            WITH right_ids AS \
-                (SELECT right_tile_id\
-                FROM count_equality_mv\
-                WHERE left_tile_id = %u \
-                ORDER BY right_tile_id)\
-            \
-            SELECT\
-            (SELECT right_tile_id FROM right_ids LIMIT 1) AS left_tile_id,\
-            right_tile_id\
-            FROM right_ids OFFSET 1);\
-     \
+    INSERT INTO count_equality_mv (\
+        WITH right_ids AS \
+            (SELECT right_tile_id\
+            FROM count_equality_mv\
+            WHERE left_tile_id = %u \
+            ORDER BY right_tile_id)\
+        \
+        SELECT\
+        (SELECT right_tile_id FROM right_ids LIMIT 1) AS left_tile_id,\
+        right_tile_id\
+        FROM right_ids OFFSET 1);\
+ \
     DELETE FROM count_equality_mv WHERE left_tile_id = %u;";
 
 
@@ -359,11 +373,14 @@ static const char materialization_of_tile_color_count_without_persistent[] = "\
 
 
 static const char select_related_tiles_ids_sql_template[] = "\
-    SELECT tcc1.tile_id FROM tile_color_count_mv tcc0\
-    CROSS JOIN tile_color_count_mv tcc1\
-    WHERE tcc0.tile_id = %u AND\
-    tcc0.tile_id <> tcc1.tile_id AND\
-    ABS(tcc0.count - tcc1.count) <= %u;";
+    SELECT tc1.tile_id \
+    FROM tile_color tc0 \
+    JOIN tile_color tc1 ON tc0.color = tc1.color \
+        AND tc0.tile_id <> tc1.tile_id \
+    JOIN tile_color_count_mv tcc ON tcc.tile_id = tc1.tile_id \
+    WHERE tc0.tile_id = %u \
+    GROUP BY tc0.tile_id, tc1.tile_id \
+    HAVING SUM(tc0.repeat_count) >= %u AND SUM(tc1.repeat_count) >= %u;";
 
 
 static const char insert_into_working_set_without_persistent_wth_max_diff_sql_template[] = "\

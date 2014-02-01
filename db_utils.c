@@ -21,23 +21,21 @@ DbInfo* create_db_info(PGconn* conn, size_t pg_sql_buffer_size) {
 
 void materialize_count_equality(const DbInfo* const db_info) {
     materialize_tile_color_count(db_info);
-//    exec_no_result(db_info, "INSERT INTO count_equality_mv (SELECT left_tile_id, right_tile_id FROM count_equality_view_unordered);"); return;
-    PGresult* const res = PQexec(db_info->conn, "SELECT DISTINCT count FROM tile_color_count_mv;");
 
-    const unsigned int count_of_count = PQntuples(res);
+    char sql[strlen(materializations_of_count_equality_mv_sql_template) + UINT32_MAX_CHARS_IN_STRING * 2];
 
-    unsigned int t_count;
+    clear_working_set(db_info);
+    create_working_set(db_info);
 
-    for (unsigned int i = 0; i < count_of_count; ++i) {
-        t_count = atoi(PQgetvalue(res, i, 0));
+    unsigned int t_id = 0;
 
-        char sql[strlen(materializations_of_count_equality_mv_sql_template) + UINT32_MAX_CHARS_IN_STRING];
-        sprintf(sql, materializations_of_count_equality_mv_sql_template, t_count);
+    while ((t_id = get_next_tile_from_working_set(db_info)) != 0) {
+        sprintf(sql, materializations_of_count_equality_mv_sql_template, t_id, t_id);
 
         exec_no_result(db_info, sql);
-    }
 
-    PQclear(res);
+        remove_tile_and_equals_tiles_from_working_set(db_info, t_id);
+    }
 }
 
 void materialize_tile_color_count(const DbInfo* const db_info) {
@@ -57,7 +55,7 @@ void read_related_tiles_ids(const DbInfo* const db_info,
                             const unsigned int max_diff_pixels) {
     char sql[strlen(select_related_tiles_ids_sql_template) + UINT32_MAX_CHARS_IN_STRING * 2];
 
-    sprintf(sql, select_related_tiles_ids_sql_template, related_tile_id, max_diff_pixels);
+    sprintf(sql, select_related_tiles_ids_sql_template, related_tile_id, 65536 - max_diff_pixels, 65536 - max_diff_pixels);
 
     PGresult* const res = PQexec(db_info->conn, sql);
 
@@ -498,6 +496,14 @@ void create_working_set(const DbInfo* const db_info) {
     exec_no_result(db_info, "INSERT INTO working_set(tile_id) SELECT id FROM tiles;");
 }
 
+void create_working_set_wo_equality_records(const DbInfo* const db_info) {
+    exec_no_result(db_info, "\
+                   INSERT INTO working_set (tile_id) SELECT t.id \
+                   FROM tiles t \
+                   LEFT JOIN count_equality_mv ce ON ce.left_tile_id <> t.id \
+                       AND ce.right_tile_id <> t.id;");
+}
+
 void create_working_set_wo_persistent_records_w_max_diff(const DbInfo* const db_info, const unsigned short max_diff_pixels) {
     char sql[strlen(insert_into_working_set_without_persistent_wth_max_diff_sql_template) + UINT32_MAX_CHARS_IN_STRING];
 
@@ -513,4 +519,12 @@ unsigned int get_next_tile_from_working_set(const DbInfo* const db_info) {
     PQclear(res);
 
     return id;
+}
+
+void remove_tile_and_equals_tiles_from_working_set(const DbInfo* const db_info, const unsigned int tile_id) {
+    char sql[strlen(remove_tile_and_equals_tiles_from_working_set_sql_template) + UINT32_MAX_CHARS_IN_STRING];
+
+    sprintf(sql, remove_tile_and_equals_tiles_from_working_set_sql_template, tile_id);
+
+    exec_no_result(db_info, sql);
 }
