@@ -25,7 +25,8 @@ HEADERS += \
     gpu_utils.h \
     cluster_utils.h \
     generic_avl_tree.h \
-    color_index_utils.h
+    color_index_utils.h \
+    apprunparams.h
 
 INCLUDEPATH += "/usr/include/postgresql" \
                "/usr/include/postgresql-9.3/"

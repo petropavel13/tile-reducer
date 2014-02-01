@@ -3,6 +3,8 @@
 
 #include "tile_utils.h"
 #include "db_utils.h"
+#include "apprunparams.h"
+
 #include <stdio.h>
 
 typedef struct TilesSequence {
@@ -54,6 +56,7 @@ typedef struct ResultSlot {
 void make_persistent_groups(const DbInfo* const db_info,
                             GenericNode *const tiles_root_node,
                             const unsigned int total,
+                            const AppRunParams arp,
                             CacheInfo *const cache_info,
                             void (*callback)(unsigned int, unsigned int));
 
@@ -68,14 +71,15 @@ void delete_result_slot(ResultSlot slot);
 
 void clusterize(GenericNode *const all_tiles,
                 const unsigned int all_tiles_count,
-                const unsigned int max_diff_pixels,
+                const AppRunParams arp,
                 const DbInfo* const db_info,
                 CacheInfo* const cache_info);
 
 void clean_related_group(const Tile *const tile,
-                           TilesSequence **related_sequence_for_tile, const unsigned int related_sequence_count,
-                           const unsigned short int max_diff_pixels,
-                           CacheInfo* const cache_info);
+                         TilesSequence **related_sequence_for_tile,
+                         const unsigned int related_sequence_count,
+                         const AppRunParams arp,
+                         CacheInfo* const cache_info);
 
 NodeResult calc_node_result(TileGroupsSequence* groups_sequence,
                             const unsigned int groups_count,

@@ -152,17 +152,15 @@ GenericNode* remove_node(GenericNode* const p, unsigned long key, void (*data_de
 }
 
 void destroy_tree(GenericNode *const root_node, void (*data_destructor)(void *)) {
-    GenericNode* node = root_node;
-
-    if(node != NULL) {
-        destroy_tree(node->left, data_destructor);
-        destroy_tree(node->right, data_destructor);
-
+    if(root_node != NULL) {
         if(data_destructor != NULL) { // NULL means data must be untouched
             data_destructor(root_node->data);
         }
 
-        free(node);
+        destroy_tree(root_node->left, data_destructor);
+        destroy_tree(root_node->right, data_destructor);
+
+        free(root_node);
     }
 }
 

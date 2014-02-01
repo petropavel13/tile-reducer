@@ -26,14 +26,7 @@ CacheInfo* init_cache(size_t max_cache_size_images, size_t max_cache_size_tree_n
 CacheSearchResult get_tile_data(unsigned int tile_id,
                             CacheInfo* const cache_info,
                             unsigned char** const tile_data) {
-    GenericNode* const current_images_root = cache_info->images_root_node;
-
-    if(current_images_root == NULL) {
-        cache_info->image_miss_count++;
-        return CACHE_MISS;
-    }
-
-    const GenericNode* const images_tree_node = find(current_images_root, tile_id);
+    const GenericNode* const images_tree_node = find(cache_info->images_root_node, tile_id);
 
     if(images_tree_node == NULL) {
         cache_info->image_miss_count++;
@@ -48,14 +41,7 @@ CacheSearchResult get_tile_data(unsigned int tile_id,
 CacheSearchResult get_diff_from_cache(unsigned long key,
                        CacheInfo *const cache_info,
                        unsigned short* const diff_pixels) {
-    GenericNode* const current_edge_root = cache_info->edges_root_node;
-
-    if(current_edge_root == NULL) {
-        cache_info->edges_miss_count++;
-        return CACHE_MISS;
-    }
-
-    const GenericNode* const edges_tree_node = find(current_edge_root, key);
+    const GenericNode* const edges_tree_node = find(cache_info->edges_root_node, key);
 
     if(edges_tree_node == NULL) {
         cache_info->edges_miss_count++;
@@ -109,7 +95,13 @@ void push_edge_to_cache(unsigned long key,
 }
 
 
-void destroy_cache(CacheInfo* cache_info) {
+void clear_images_cache(CacheInfo * const cache_info) {
+    destroy_tree(cache_info->images_root_node, &image_data_destructor);
+    cache_info->images_root_node = NULL;
+}
+
+
+void destroy_cache(CacheInfo * const cache_info) {
     destroy_tree(cache_info->edges_root_node, &edge_data_destructor);
     destroy_tree(cache_info->images_root_node, &image_data_destructor);
 

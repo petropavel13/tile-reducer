@@ -5,6 +5,7 @@
 #include "db_utils.h"
 #include "cluster_utils.h"
 #include "color_index_utils.h"
+#include "apprunparams.h"
 
 #include <libpq-fe.h>
 #include <pthread.h>
@@ -164,6 +165,8 @@ int main(int argc, char* argv [])
         return 1;
     }
 
+    const AppRunParams arp = make_app_run_params(max_diff_pixels, max_num_threads);
+
     printf("Tiles folder: \"%s\"\nMax diff. pixels: %u\nCache size: %u MB\nMax threads: %u\n\n",
                           path,
                           max_diff_pixels,
@@ -210,7 +213,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-    clear_all_data(db_info);
+//    clear_all_data(db_info);
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
@@ -307,7 +310,7 @@ int main(int argc, char* argv [])
         printf("\rMaterializing count equality view...done\n");
         fflush(stdout);
 
-        make_persistent_groups(db_info, all_tiles, total, cache_info, &print_make_persistent_groups);
+        make_persistent_groups(db_info, all_tiles, total, arp, cache_info, &print_make_persistent_groups);
 
         printf("\r                                                ");
         printf("\rMaking persistent groups...done\n");
@@ -315,7 +318,7 @@ int main(int argc, char* argv [])
     }
 
     if (max_diff_pixels > 0) {
-        clusterize(all_tiles, total, max_diff_pixels, db_info, cache_info);
+        clusterize(all_tiles, total, arp, db_info, cache_info);
     }
 
     destroy_tree(all_tiles, &tile_destructor);

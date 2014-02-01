@@ -3,6 +3,7 @@
 void make_persistent_groups(const DbInfo *const db_info,
                             GenericNode *const tiles_root_node,
                             const unsigned int total,
+                            const AppRunParams arp,
                             CacheInfo* const cache_info,
                             void (*callback)(unsigned int, unsigned int)) {
     unsigned int* pg_ids = NULL;
@@ -34,7 +35,7 @@ void make_persistent_groups(const DbInfo *const db_info,
         }
 
         if(t_ids_count > 1) {
-            calc_diff_one_with_many(next_tile, equal_candidates, t_ids_count, cache_info, results);
+            calc_diff_one_with_many(next_tile, equal_candidates, t_ids_count, cache_info, arp, results);
 
             for (unsigned int i = 0; i < t_ids_count; ++i) {
                 if(results[i] == 0) {
@@ -115,13 +116,13 @@ void delete_result_slot(ResultSlot slot) {
 
 void clusterize(GenericNode* const all_tiles,
                 const unsigned int all_tiles_count,
-                const unsigned int max_diff_pixels,
+                const AppRunParams arp,
                 const DbInfo* const db_info,
                 CacheInfo* const cache_info) {
     materialize_tile_color_count_wo_persistent(db_info);
 
     clear_working_set(db_info);
-    create_working_set_wo_persistent_records_w_max_diff(db_info, max_diff_pixels);
+    create_working_set_wo_persistent_records_w_max_diff(db_info, arp.max_diff_pixels);
 
     unsigned int working_set_count = 0;
     unsigned int* const working_set_ids = (unsigned int*)malloc(sizeof(unsigned int) * all_tiles_count);
@@ -162,7 +163,7 @@ void clusterize(GenericNode* const all_tiles,
     TilesSequence* t_related_sequence = NULL;
 
     while (t_tiles_sequence != NULL && t_tiles_sequence != t_last) {
-        read_related_tiles_ids(db_info, t_tiles_sequence->tile->tile_id, related_ids, &related_count, max_diff_pixels);
+        read_related_tiles_ids(db_info, t_tiles_sequence->tile->tile_id, related_ids, &related_count, arp.max_diff_pixels);
 
         t_related_sequence = create_tiles_sequence_from_tile_ids(free_tiles, related_ids, related_count);
 
@@ -170,7 +171,7 @@ void clusterize(GenericNode* const all_tiles,
             working_set_count--;
             free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, NULL);
         } else {
-            clean_related_group(t_tiles_sequence->tile, &t_related_sequence, related_count, max_diff_pixels, cache_info);
+            clean_related_group(t_tiles_sequence->tile, &t_related_sequence, related_count, arp, cache_info);
             related_tiles = insert(related_tiles, t_tiles_sequence->tile->tile_id, t_related_sequence);
         }
 
@@ -221,7 +222,7 @@ void clusterize(GenericNode* const all_tiles,
         last_group_in_seq = last_group_in_seq->next;
     }
 
-    hungry_by_groups(last_group_in_seq, binded_tiles_sequence, &used_tiles, &free_tiles, (Tile*) free_tiles->data, max_diff_pixels, cache_info);
+    hungry_by_groups(last_group_in_seq, binded_tiles_sequence, &used_tiles, &free_tiles, (Tile*) free_tiles->data, arp.max_diff_pixels, cache_info);
 
     BindedTilesSequence* t_binded_sequence = binded_tiles_sequence->next;
 
@@ -248,10 +249,10 @@ void clusterize(GenericNode* const all_tiles,
 void clean_related_group(const Tile* const tile,
                          TilesSequence** related_sequence_for_tile,
                          const unsigned int related_sequence_count,
-                         const unsigned short int max_diff_pixels,
+                         const AppRunParams arp,
                          CacheInfo* const cache_info) {
     if(related_sequence_count > 1) {
-        Tile** const related_tiles_for_tile = (Tile**)malloc(sizeof(Tile*) * related_sequence_count);
+        Tile* related_tiles_for_tile[related_sequence_count];
 
         TilesSequence* t_related_tile = *related_sequence_for_tile;
 
@@ -262,7 +263,7 @@ void clean_related_group(const Tile* const tile,
 
         unsigned short int* const diff_results = (unsigned short int*)malloc(sizeof(unsigned short int) * related_sequence_count);
 
-        calc_diff_one_with_many(tile, (const Tile* const * const)related_tiles_for_tile, related_sequence_count, cache_info, diff_results);
+        calc_diff_one_with_many(tile, (const Tile* const * const)related_tiles_for_tile, related_sequence_count, cache_info, arp, diff_results);
 
 
         TilesSequence* new_sequence_first = (TilesSequence*)malloc(sizeof(TilesSequence));
@@ -272,7 +273,7 @@ void clean_related_group(const Tile* const tile,
         unsigned int hit_count = 0;
 
         for (unsigned int i = 0; i < related_sequence_count; ++i) {
-            if(diff_results[i] <= max_diff_pixels) {
+            if(diff_results[i] <= arp.max_diff_pixels) {
                 hit_count++;
 
                 new_sequence->tile = related_tiles_for_tile[i];
@@ -296,12 +297,11 @@ void clean_related_group(const Tile* const tile,
             delete_tiles_sequence(new_sequence_first);
         }
 
-        free(related_tiles_for_tile);
         free(diff_results);
     } else if(related_sequence_count == 1) {
         const unsigned short t_compare_result = calc_diff(tile, (*related_sequence_for_tile)->tile, cache_info);
 
-        if(t_compare_result > max_diff_pixels) {
+        if(t_compare_result > arp.max_diff_pixels) {
             delete_tiles_sequence(*related_sequence_for_tile);
             (*related_sequence_for_tile) = NULL;
         }

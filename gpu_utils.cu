@@ -66,7 +66,8 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
 
     cudaMemGetInfo(&available_memory, &total_memory);
 
-    const unsigned int max_r_tiles_by_mem = floor((double)(available_memory - TILE_SIZE_BYTES) / (double)(TILE_SIZE_BYTES + DIFF_CONVOLUTION_Z_SIZE + DIFF_CONVOLUTION_Y_SIZE + DIFF_CONVOLUTION_X_SIZE));
+    const unsigned int max_r_tiles_by_mem_ideal = floor((double)(available_memory - TILE_SIZE_BYTES) / (double)(TILE_SIZE_BYTES * 2 + DIFF_CONVOLUTION_Z_SIZE + DIFF_CONVOLUTION_Y_SIZE + DIFF_CONVOLUTION_X_SIZE));
+    const unsigned int max_r_tiles_by_mem = max_r_tiles_by_mem_ideal * 0.9;
     const unsigned int tiles_per_loop = right_images_count > max_r_tiles_by_mem ? max_r_tiles_by_mem : right_images_count;
     const unsigned int full_loops_count = floor((double)right_images_count / (double)max_r_tiles_by_mem);
     const unsigned int loops_count = ceil((double)right_images_count / (double)max_r_tiles_by_mem);
@@ -110,7 +111,7 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
         CHECK_ERROR_VERBOSE_LEAVE( cudaStreamCreate(&streams[j]), "create stream", exit, error )
     }
 
-    alloc_device_mem(sPointers, full_streams_count, tiles_per_stream);
+    CHECK_ERROR_VERBOSE_LEAVE( alloc_device_mem(sPointers, full_streams_count, tiles_per_stream), "alloc device mem", exit, error )
 
     if (streams_count > full_streams_count) {
         tail_count = tiles_per_loop == tiles_per_stream ? tiles_per_loop : tiles_per_loop % tiles_per_stream;
@@ -119,7 +120,7 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
 
         CHECK_ERROR_VERBOSE_LEAVE( cudaStreamCreate(&streams[full_streams_count]), "create stream", exit, error )
 
-        alloc_device_mem(&sPointers[full_streams_count], 1, tail_count);
+        CHECK_ERROR_VERBOSE_LEAVE( alloc_device_mem(&sPointers[full_streams_count], 1, tail_count), "alloc device mem tail", exit, error )
     }
 
 

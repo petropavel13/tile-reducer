@@ -63,7 +63,9 @@ void push_edge_to_cache(unsigned long key,
                         unsigned short int diff_pixels,
                         CacheInfo* const cache_info);
 
-void destroy_cache(CacheInfo* cache_info);
+void clear_images_cache(CacheInfo* const cache_info);
+
+void destroy_cache(CacheInfo* const cache_info);
 
 void edge_data_destructor(void* data);
 
