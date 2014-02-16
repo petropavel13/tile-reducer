@@ -18,8 +18,8 @@
 #define STRINGS_EQUAL 0
 
 //#define CONNECTION_STRING "dbname=tiles_db hostaddr=192.168.0.108 user=postgres port=5432 password=123"
-#define CONNECTION_STRING "dbname=tiles_db hostaddr=172.18.36.131 user=postgres port=5432 password=123"
-//#define CONNECTION_STRING "dbname=tiles_db host=/var/run/postgresql user=postgres password=123"
+//#define CONNECTION_STRING "dbname=tiles_test hostaddr=172.18.36.131 user=postgres port=5432 password=123"
+#define CONNECTION_STRING "dbname=tiles_test host=/var/run/postgresql user=postgres password=123"
 
 
 #define LEFT 0
@@ -112,7 +112,7 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
 
     for (unsigned char i = 0; i < num_threads; ++i) {
         heads[i] = get_head(tiles_tree, num_threads >> 2, i);
-        connections[i] = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 1);
+        connections[i] = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 2);
 //        th_params[i] = make_tct_params(heads[i], NULL, NULL, connections[i]);
         th_params[i] = make_tct_params(heads[i], &print_progress_index_colors, &print_progress_tiles_colors_db_write, connections[i]);
         pthread_create(&threads[i], NULL, &index_tree_and_flush_result, &th_params[i]);
@@ -121,7 +121,7 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
 
     GenericNode* const tails = get_tails(create_node(tiles_tree->key, tiles_tree->data), tiles_tree, num_threads >> 2);
 
-    DbInfo* const db_info = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 1);
+    DbInfo* const db_info = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 2);
     TCTParams params = make_tct_params(tails, NULL, NULL, db_info);
 
     index_tree_and_flush_result(&params);
@@ -216,7 +216,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-//    clear_all_data(db_info);
+    clear_all_data(db_info); // DEBUG
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
@@ -321,7 +321,7 @@ int main(int argc, char* argv [])
     }
 
     if (max_diff_pixels > 0) {
-        clusterize(all_tiles, total, arp, db_info, cache_info);
+        clusterize_simple(all_tiles, total, arp, db_info, cache_info);
     }
 
     destroy_tree(all_tiles, &tile_destructor);

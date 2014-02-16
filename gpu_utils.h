@@ -24,6 +24,9 @@ extern "C" TaskStatus compare_one_image_with_others(const unsigned char * const 
                                                       const unsigned char * const raw_right_images,
                                                       const unsigned int right_images_count,
                                                       unsigned short *const diff_results);
+
+extern "C" void* gpu_backend_memory_allocator(size_t bytes);
+extern "C" void gpu_backend_memory_deallocator(void* ptr);
 #else
 // gcc compiles as C code
 
@@ -38,6 +41,9 @@ TaskStatus compare_one_image_with_others(const unsigned char * const raw_left_im
                                                       const unsigned char * const raw_right_images,
                                                       const unsigned int right_images_count,
                                                       unsigned short *const diff_results);
+
+void* gpu_backend_memory_allocator(size_t bytes);
+void gpu_backend_memory_deallocator(void* ptr);
 #endif
 
 typedef struct DevicePointers {

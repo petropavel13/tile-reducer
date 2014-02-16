@@ -69,11 +69,43 @@ void delete_binded_tiles_sequence(BindedTilesSequence* const sequence);
 
 void delete_result_slot(ResultSlot slot);
 
-void clusterize(GenericNode *const all_tiles,
+void clusterize_simple(GenericNode *const all_tiles,
                 const unsigned int all_tiles_count,
                 const AppRunParams arp,
                 const DbInfo* const db_info,
                 CacheInfo* const cache_info);
+
+unsigned char check_has_real_related(const Tile* const tile,
+                                     const Tile* const * const related_tiles,
+                                     const unsigned int related_count,
+                                     GenericNode ** const cached_related,
+                                     const AppRunParams arp,
+                                     CacheInfo* const cache_info);
+
+void simple_by_groups(Tile ** const groups,
+                      unsigned int* offset,
+                      BindedTilesSequence* binded_tiles_sequence,
+                      GenericNode** used_tiles,
+                      GenericNode** not_used,
+                      Tile *const tile,
+                      const unsigned int max_diff_pixels,
+                      CacheInfo* const cache_info);
+
+
+unsigned char simple_by_groups_left(Tile ** const groups,
+                                    unsigned int * const offset,
+                                    BindedTilesSequence* binded_tiles_sequence,
+                                    Tile* const tile,
+                                    const unsigned int max_diff_pixels,
+                                    CacheInfo* const cache_info);
+
+//void clusterize(GenericNode *const all_tiles,
+//                const unsigned int all_tiles_count,
+//                const AppRunParams arp,
+//                const DbInfo* const db_info,
+//                CacheInfo* const cache_info);
+
+
 
 void clean_related_group(const Tile *const tile,
                          TilesSequence **related_sequence_for_tile,
@@ -118,20 +150,6 @@ NodeResult calc_node_result_group_selected(TileGroupsSequence* groups_sequence,
                                            CacheInfo* const cache_info);
 
 
-void hungry_by_groups(TileGroupsSequence* groups_sequence,
-                            BindedTilesSequence* binded_tiles_sequence,
-                            GenericNode** used_tiles,
-                            GenericNode** not_used,
-                            Tile *const tile,
-                            const unsigned int max_diff_pixels,
-                            CacheInfo* const cache_info);
-
-
-unsigned char hungry_by_groups_left(TileGroupsSequence* groups_sequence,
-                                 BindedTilesSequence* binded_tiles_sequence,
-                                 Tile* const tile,
-                                 const unsigned int max_diff_pixels,
-                                 CacheInfo* const cache_info);
 
 
 TilesSequence *make_tile_sequence_from_tree(const GenericNode* const node, TilesSequence* const sequence);

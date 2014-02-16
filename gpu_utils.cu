@@ -67,25 +67,23 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
     cudaMemGetInfo(&available_memory, &total_memory);
 
     const unsigned int max_r_tiles_by_mem_ideal = floor((double)(available_memory - TILE_SIZE_BYTES) / (double)(TILE_SIZE_BYTES * 2 + DIFF_CONVOLUTION_Z_SIZE + DIFF_CONVOLUTION_Y_SIZE + DIFF_CONVOLUTION_X_SIZE));
-    const unsigned int max_r_tiles_by_mem = max_r_tiles_by_mem_ideal * 0.9;
+    const unsigned int max_r_tiles_by_mem = max_r_tiles_by_mem_ideal * 0.95;
     const unsigned int tiles_per_loop = right_images_count > max_r_tiles_by_mem ? max_r_tiles_by_mem : right_images_count;
     const unsigned int full_loops_count = floor((double)right_images_count / (double)max_r_tiles_by_mem);
     const unsigned int loops_count = ceil((double)right_images_count / (double)max_r_tiles_by_mem);
 
     const unsigned int max_r_tiles_by_dim = (max_dim_of_grid_of_blocks + 1) / 256;
     const unsigned int tiles_per_stream = tiles_per_loop > max_r_tiles_by_dim ? max_r_tiles_by_dim : tiles_per_loop;
-    const unsigned int full_streams_count =  floor((double)tiles_per_loop / (double)max_r_tiles_by_dim);
-    const unsigned int streams_count = ceil((double)tiles_per_loop / (double)max_r_tiles_by_dim);
+    const unsigned int full_streams_count =  floor((double)tiles_per_loop / (double)tiles_per_stream);
+    const unsigned int streams_count = ceil((double)tiles_per_loop / (double)tiles_per_stream);
 
 
     cudaStream_t streams[streams_count];
 
     DevicePointers sPointers[streams_count];
 
-    const size_t right_images_size = TILE_SIZE_BYTES * right_images_count;
-
     unsigned char* pinned_left_raw_image = NULL;
-    unsigned char* pinned_right_raw_images = NULL;
+    const unsigned char* const pinned_right_raw_images = raw_right_images;// we already use cuda allocator
 
     unsigned char* d_left_image = NULL;
 
@@ -97,11 +95,8 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
     unsigned int tail_count = 0;
 
     CHECK_ERROR_VERBOSE_LEAVE( cudaMallocHost((void**)&pinned_left_raw_image, TILE_SIZE_BYTES), "alloc pinned_left_raw_image ", exit, error )
-    CHECK_ERROR_VERBOSE_LEAVE( cudaMallocHost((void**)&pinned_right_raw_images, right_images_size), "alloc pinned_right_raw_image ", exit, error )
 
     memcpy(pinned_left_raw_image, raw_left_image, TILE_SIZE_BYTES);
-    memcpy(pinned_right_raw_images, raw_right_images, right_images_size);
-
 
     CHECK_ERROR_VERBOSE_LEAVE( cudaMalloc((void**)&d_left_image, TILE_SIZE_BYTES), "alloc left_pixels", exit, error )
     CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy((void*)d_left_image, (const void*)raw_left_image, TILE_SIZE_BYTES, H2D), "copy left_pixels", exit, error )
@@ -123,83 +118,78 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
         CHECK_ERROR_VERBOSE_LEAVE( alloc_device_mem(&sPointers[full_streams_count], 1, tail_count), "alloc device mem tail", exit, error )
     }
 
-
     for (unsigned int i = 0; i < full_loops_count; ++i) {
-        do_it_again_full:
+        for (unsigned int j = 0; j < full_streams_count; ++j) {
+            CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[j].right_raw_images, sPointers[j].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tiles_per_stream, H2D, streams[j]), "copy right_pixels async", inner_error_full, error )
 
-        res_offset = index_in_3d(0, streams_count, i, 0, tiles_per_stream);
-        tiles_offset = index_in_3d(0, streams_count, i, 0, tiles_per_stream * TILE_SIZE_BYTES);
+            CHECK_ERROR_VERBOSE_LEAVE( run_compare(rp, sPointers[j], streams[j], tiles_per_stream, &diff_results[res_offset]), "run & copy results", inner_error_full, error )
 
-        do {
-            for (unsigned int j = 0; j < full_streams_count; ++j) {
-                CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[j].right_raw_images, sPointers[j].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tiles_per_stream, H2D, streams[j]), "copy right_pixels async", inner_error_full, error )
-
-                CHECK_ERROR_VERBOSE_LEAVE( run_compare(rp, sPointers[j], streams[j], tiles_per_stream, &diff_results[res_offset]), "run & copy results", inner_error_full, error )
-
-                res_offset += tiles_per_stream;
-                tiles_offset += tiles_per_stream * TILE_SIZE_BYTES;
-            }
+            res_offset += tiles_per_stream;
+            tiles_offset += tiles_per_stream * TILE_SIZE_BYTES;
+        }
 
 
-            if (streams_count > full_streams_count) {
-                tail_count = tiles_per_loop % tiles_per_stream;
+        if (streams_count > full_streams_count) {
+            tail_count = tiles_per_loop % tiles_per_stream;
 
-                RunParams tail_rp = make_run_params(tail_count);
+            RunParams tail_rp = make_run_params(tail_count);
 
-                CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[full_streams_count].right_raw_images, sPointers[full_streams_count].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tail_count, H2D, streams[full_streams_count]), "copy right_pixels async", inner_error_full, error )
+            CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[full_streams_count].right_raw_images, sPointers[full_streams_count].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tail_count, H2D, streams[full_streams_count]), "copy right_pixels async", inner_error_full, error )
 
-                CHECK_ERROR_VERBOSE_LEAVE( run_compare(tail_rp, sPointers[full_streams_count], streams[full_streams_count], tail_count, &diff_results[res_offset]), "run & copy results", inner_error_full, error )
-            }
+            CHECK_ERROR_VERBOSE_LEAVE( run_compare(tail_rp, sPointers[full_streams_count], streams[full_streams_count], tail_count, &diff_results[res_offset]), "run & copy results", inner_error_full, error )
 
-            inner_error_full:
+            res_offset += tail_count;
+            tiles_offset += tail_count * TILE_SIZE_BYTES;
+        }
 
-            if (error != cudaSuccess) {
-                cudaDeviceSynchronize();
-                cudaDeviceReset();
+        inner_error_full:
 
-                goto do_it_again_full;
-            } else {
-                error = cudaDeviceSynchronize();
-            }
-        } while (error != cudaSuccess);
+        if (error != cudaSuccess) {
+            cudaDeviceSynchronize();
+            cudaDeviceReset();
+
+            goto exit;
+        } else {
+            error = cudaDeviceSynchronize();
+        }
     }
 
 
     if (loops_count > full_loops_count) {
         const unsigned int tiles_per_tail_loop_count = right_images_count == tiles_per_loop ? right_images_count : right_images_count % tiles_per_loop;
 
-        const unsigned int tail_full_streams_count = floor((double)tiles_per_tail_loop_count / (double)max_r_tiles_by_dim);
-        const unsigned int tail_streams_count = ceil((double)tiles_per_tail_loop_count / (double)max_r_tiles_by_dim);
+        const unsigned int tail_full_streams_count = floor((double)tiles_per_tail_loop_count / (double)tiles_per_stream);
+        const unsigned int tail_streams_count = ceil((double)tiles_per_tail_loop_count / (double)tiles_per_stream);
 
-        do {
-            for (unsigned int j = 0; j < tail_full_streams_count; ++j) {
-                CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[j].right_raw_images, sPointers[j].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tiles_per_stream, H2D, streams[j]), "copy right_pixels async", inner_error_tail, error )
+        for (unsigned int j = 0; j < tail_full_streams_count; ++j) {
+            CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[j].right_raw_images, sPointers[j].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tiles_per_stream, H2D, streams[j]), "copy right_pixels async", inner_error_tail, error )
 
-                CHECK_ERROR_VERBOSE_LEAVE( run_compare(rp, sPointers[j], streams[j], tiles_per_stream, &diff_results[res_offset]), "run & copy results", inner_error_tail, error )
+            CHECK_ERROR_VERBOSE_LEAVE( run_compare(rp, sPointers[j], streams[j], tiles_per_stream, &diff_results[res_offset]), "run & copy results", inner_error_tail, error )
 
-                res_offset += tiles_per_stream;
-                tiles_offset += tiles_per_stream * TILE_SIZE_BYTES;
-            }
+            res_offset += tiles_per_stream;
+            tiles_offset += tiles_per_stream * TILE_SIZE_BYTES;
+        }
 
 
-            if (tail_streams_count > tail_full_streams_count) {
-                tail_count = tiles_per_tail_loop_count == tiles_per_stream ? tiles_per_tail_loop_count : tiles_per_tail_loop_count % tiles_per_stream;
+        if (tail_streams_count > tail_full_streams_count) {
+            tail_count = tiles_per_tail_loop_count == tiles_per_stream ? tiles_per_tail_loop_count : tiles_per_tail_loop_count % tiles_per_stream;
 
-                RunParams tail_rp = make_run_params(tail_count);
-                CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[tail_full_streams_count].right_raw_images, sPointers[tail_full_streams_count].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tail_count, H2D, streams[tail_full_streams_count]), "copy right_pixels async", inner_error_tail, error )
+            RunParams tail_rp = make_run_params(tail_count);
+            CHECK_ERROR_VERBOSE_LEAVE( cudaMemcpy2DAsync((void*)sPointers[tail_full_streams_count].right_raw_images, sPointers[tail_full_streams_count].right_raw_images_pitch, (const void*)&pinned_right_raw_images[tiles_offset], TILE_SIZE_BYTES, TILE_SIZE_BYTES, tail_count, H2D, streams[tail_full_streams_count]), "copy right_pixels async", inner_error_tail, error )
 
-                CHECK_ERROR_VERBOSE_LEAVE( run_compare(tail_rp, sPointers[tail_full_streams_count], streams[tail_full_streams_count], tail_count, &diff_results[res_offset]), "run & copy results", inner_error_tail, error )
-            }
+            CHECK_ERROR_VERBOSE_LEAVE( run_compare(tail_rp, sPointers[tail_full_streams_count], streams[tail_full_streams_count], tail_count, &diff_results[res_offset]), "run & copy results", inner_error_tail, error )
+        }
 
-            inner_error_tail:
+        inner_error_tail:
 
-            if (error != cudaSuccess) {
-                cudaDeviceSynchronize();
-                cudaDeviceReset();
-            } else {
-                error = cudaDeviceSynchronize();
-            }
-        } while (error != cudaSuccess);
+        if (error != cudaSuccess) {
+            cudaDeviceSynchronize();
+            cudaDeviceReset();
+
+            goto exit;
+        } else {
+            error = cudaDeviceSynchronize();
+        }
     }
 
     exit:
@@ -211,11 +201,6 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
     if (pinned_left_raw_image != NULL) {
         cudaFreeHost(pinned_left_raw_image);
     }
-
-    if (pinned_right_raw_images != NULL) {
-        cudaFreeHost(pinned_right_raw_images);
-    }
-
 
     cudaFree(d_left_image);
 
@@ -264,6 +249,17 @@ TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_ima
 
 
     return error == cudaSuccess ? TASK_DONE : TASK_FAILED;
+}
+
+void* gpu_backend_memory_allocator(size_t bytes) {
+    void* ptr = NULL;
+    cudaMallocHost(&ptr, bytes);
+
+    return ptr;
+}
+
+void gpu_backend_memory_deallocator(void* ptr) {
+    cudaFreeHost(ptr);
 }
 
 RunParams make_run_params(const unsigned int stream_size) {

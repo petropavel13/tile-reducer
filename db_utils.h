@@ -93,14 +93,19 @@ void add_2_values_using_buffer(const DbInfo* const db_info,
 
 void flush_db_buffer(const DbInfo* const db_info);
 
-
 void create_working_set(const DbInfo* const db_info);
 void create_working_set_wo_equality_records(const DbInfo* const db_info);
-void create_working_set_wo_persistent_records_w_max_diff(const DbInfo* const db_info, const unsigned short max_diff_pixels);
+void create_working_set_wo_persistent_ids(const DbInfo* const db_info);
+
+void remove_tile_from_working_set(const DbInfo* const db_info, const unsigned int tile_id);
+void remove_tile_and_equals_tiles_from_working_set(const DbInfo* const db_info, const unsigned int tile_id);
+void remove_tile_and_equals_tiles_from_working_set_huge(const DbInfo* const db_info, const unsigned int tile_id);
 
 unsigned int get_next_tile_from_working_set(const DbInfo* const db_info);
+void read_working_set_ids(const DbInfo* const db_info,
+                          unsigned int* const ids,
+                          unsigned int* const count);
 
-void remove_tile_and_equals_tiles_from_working_set(const DbInfo* const db_info, const unsigned int tile_id);
 
 void materialize_count_equality(const DbInfo* const db_info);
 
@@ -112,7 +117,7 @@ void read_related_tiles_ids(const DbInfo* const db_info, const unsigned int rela
                             unsigned int * const count,
                             const unsigned int max_diff_pixels);
 
-void read_working_set_tiles_ids(const DbInfo* const db_info, unsigned int *const ids, unsigned int* const count);
+void read_tile_color_count_tiles_ids(const DbInfo* const db_info, unsigned int *const ids, unsigned int* const count);
 
 void read_persistent_groups(const DbInfo* const db_info,
                             unsigned int ** const leaders_ids,
@@ -133,24 +138,31 @@ static inline void clear_tile_color_count(const DbInfo* const db_info) {
 }
 
 static inline void drop_index_tile_color(const DbInfo* const db_info) {
-    exec_no_result(db_info, "DROP INDEX tile_color_color_repeat_indx;");
+    exec_no_result(db_info, "\
+                    DROP INDEX tile_color_color_indx; \
+                    DROP INDEX tile_color_color_repeat_indx; \
+                    DROP INDEX tile_color_tile_id_indx;");
 }
 
 static inline void create_index_tile_color(const DbInfo* const db_info) {
-    exec_no_result(db_info, "CREATE INDEX tile_color_color_repeat_indx\
-                   ON tile_color\
-                   USING btree\
-                   (color, repeat_count);");
+    exec_no_result(db_info, "\
+                CREATE INDEX tile_color_color_indx \
+                    ON tile_color \
+                    USING btree \
+                    (color); \
+                CREATE INDEX tile_color_color_repeat_indx \
+                    ON tile_color \
+                    USING btree \
+                    (color, repeat_count); \
+                CREATE INDEX tile_color_tile_id_indx \
+                    ON tile_color \
+                    USING btree \
+                    (tile_id);");
 }
 
-static inline void begin_transaction(const DbInfo* const db_info) {
-    exec_no_result(db_info, "BEGIN;");
-}
-
-static inline void commit_transaction(const DbInfo* const db_info) {
-    exec_no_result(db_info, "COMMIT;");
-}
-
+void exec_template_one_param(const DbInfo* const db_info,
+                             const char* const sql_template,
+                             const unsigned int param);
 
 static const char exists_template[] = "SELECT EXISTS(SELECT * FROM information_schema.tables WHERE table_name='%s')";
 
@@ -187,6 +199,8 @@ static const char sql_buffer_template_in_zero_equal_pair[] = ",%u";
 static const char sql_template_add_tile_to_group[] = "INSERT INTO tiles_groups (leader_tile_id, tile_id) VALUES(%u,%u);";
 static const char sql_buffer_template_insert_tile_to_group[] = "INSERT INTO tiles_groups (leader_tile_id, tile_id) VALUES(%u,%u)";
 static const char sql_buffer_template_values_tile_to_group[] = ",(%u,%u)";
+
+static const char sql_template_delete_tile_from_working_set[] = "DELETE FROM working_set WHERE tile_id = %u;";
 
 static const char create_table_tiles[] = "\
     CREATE TABLE tiles (\
@@ -245,6 +259,11 @@ static const char create_table_tile_color[] = "\
             REFERENCES tiles (id) MATCH SIMPLE\
             ON UPDATE CASCADE ON DELETE CASCADE\
     );\
+    \
+    CREATE INDEX tile_color_color_indx \
+        ON tile_color \
+        USING btree \
+        (color); \
     CREATE INDEX tile_color_color_repeat_indx\
         ON tile_color\
         USING btree\
@@ -331,14 +350,40 @@ static const char materializations_of_count_equality_mv_sql_template[] = "\
         HAVING COUNT(tc0.color) = (SELECT count FROM tile_color_count_mv WHERE tile_id = tc1.tile_id));";
 
 
-// For some reason EXISTS clause doesn't use indexes. That's sad.
-static const char remove_tile_and_equals_tiles_from_working_set_sql_template[] = "\
-    DELETE FROM working_set \
-    WHERE tile_id = %u \
-        OR tile_id IN (SELECT t.tile_id \
-                       FROM working_set t \
-                       JOIN count_equality_mv ce ON ce.left_tile_id = t.tile_id \
-                           OR ce.right_tile_id = t.tile_id);";
+static const char remove_tile_and_equals_from_working_set_sql_template[] = "\
+        DELETE FROM working_set \
+        WHERE tile_id = %u \
+            OR tile_id IN (SELECT t.tile_id \
+                           FROM working_set t \
+                           JOIN count_equality_mv ce ON ce.left_tile_id = t.tile_id \
+                               OR ce.right_tile_id = t.tile_id);";
+
+static const char remove_tile_and_equals_tiles_from_working_set_huge_sql_template[] = "\
+    SELECT tile_id \
+    INTO TEMP tmp_working_set \
+    FROM \
+        (SELECT tile_id \
+        FROM working_set \
+        EXCEPT \
+        ( \
+            (SELECT tile_id \
+            FROM working_set ws \
+            WHERE EXISTS (SELECT 1 FROM count_equality_mv ce WHERE ce.right_tile_id = ws.tile_id)) \
+            \
+            UNION ALL \
+            \
+            (SELECT %u) \
+            \
+            UNION ALL \
+            \
+            (SELECT DISTINCT left_tile_id FROM count_equality_mv) \
+        ) \
+    ) AS good_ids; \
+    \
+    TRUNCATE working_set; \
+    INSERT INTO working_set (SELECT tile_id FROM tmp_working_set); \
+    DROP TABLE tmp_working_set;";
+
 
 static const char sql_template_remix_count_equality_mv[] = "\
     INSERT INTO count_equality_mv (\
@@ -373,23 +418,16 @@ static const char materialization_of_tile_color_count_without_persistent[] = "\
 
 
 static const char select_related_tiles_ids_sql_template[] = "\
+    WITH tc0_colors AS \
+        (SELECT tile_id, color, repeat_count \
+        FROM tile_color \
+        WHERE tile_id = %u) \
     SELECT tc1.tile_id \
-    FROM tile_color tc0 \
+    FROM tc0_colors tc0 \
     JOIN tile_color tc1 ON tc0.color = tc1.color \
-        AND tc0.tile_id <> tc1.tile_id \
-    JOIN tile_color_count_mv tcc ON tcc.tile_id = tc1.tile_id \
     WHERE tc0.tile_id = %u \
+        AND tc0.tile_id <> tc1.tile_id \
     GROUP BY tc0.tile_id, tc1.tile_id \
     HAVING SUM(tc0.repeat_count) >= %u AND SUM(tc1.repeat_count) >= %u;";
-
-
-static const char insert_into_working_set_without_persistent_wth_max_diff_sql_template[] = "\
-    INSERT INTO working_set\
-    (SELECT DISTINCT\
-    tcc0.tile_id\
-    FROM tile_color_count_mv tcc0\
-        CROSS JOIN tile_color_count_mv tcc1\
-    WHERE tcc0.tile_id <> tcc1.tile_id AND\
-        ABS(tcc0.count - tcc1.count) <= %u);";
 
 #endif // DB_UTILS_H

@@ -244,6 +244,14 @@ TaskStatus compare_images_one_with_many_cpu(const unsigned char * const left_raw
     return TASK_DONE;
 }
 
+void* cpu_backend_memory_allocator(size_t bytes) {
+    return malloc(bytes);
+}
+
+void cpu_backend_memory_deallocator(void* ptr) {
+    free(ptr);
+}
+
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
                  unsigned char ** const pixels) {
@@ -327,16 +335,16 @@ void calc_diff_one_with_many(const Tile* const left_tile,
     unsigned char* left_tile_pixels = NULL;
     load_pixels(left_tile, cache_info, &left_tile_pixels);
 
-    unsigned char* const raw_right_tiles = malloc(TILE_SIZE_BYTES * tiles_per_mem_loop);
+    CompareBackend t_cb = make_backend(count_for_load > 32 ? CUDA_GPU : CPU, tiles_per_mem_loop);
+
+    unsigned char* t_raw_right_tiles = t_cb.memory_allocator(TILE_SIZE_BYTES * tiles_per_mem_loop);
 
     unsigned short int* const t_results = malloc(sizeof(unsigned short int) * tiles_per_mem_loop);
 
-    CompareBackend t_cb = make_backend(count_for_load > 32 ? CUDA_GPU : CPU, tiles_per_mem_loop);
-
     for (unsigned int i = 0; i < loops_count; ++i) {
-        load_tiles_pixels_threads((const Tile* const * const)right_tiles_for_load + t_offset, tiles_per_mem_loop, cache_info, arp, raw_right_tiles);
+        load_tiles_pixels_threads((const Tile* const * const)right_tiles_for_load + t_offset, tiles_per_mem_loop, cache_info, arp, t_raw_right_tiles);
 
-        t_cb.one_with_many_func(left_tile_pixels, raw_right_tiles, tiles_per_mem_loop, t_results);
+        while(t_cb.one_with_many_func(left_tile_pixels, t_raw_right_tiles, tiles_per_mem_loop, t_results) == TASK_FAILED);
 
         for (unsigned int j = 0; j < tiles_per_mem_loop; ++j) {
             push_edge_to_cache(keys_for_load[t_offset + j], t_results[j], cache_info);
@@ -345,6 +353,8 @@ void calc_diff_one_with_many(const Tile* const left_tile,
 
         t_offset += tiles_per_mem_loop;
     }
+
+    t_cb.memory_deallocator(t_raw_right_tiles);
 
 
     if (tail_count > 0) {
@@ -363,19 +373,22 @@ void calc_diff_one_with_many(const Tile* const left_tile,
         } else {
             t_cb = make_backend(tail_count > 32 ? CUDA_GPU : CPU, tail_count);
 
-            load_tiles_pixels_threads((const Tile* const * const)right_tiles_for_load + t_offset, tail_count, cache_info, arp, raw_right_tiles);
+            t_raw_right_tiles = t_cb.memory_allocator(TILE_SIZE_BYTES * tail_count);
 
-            t_cb.one_with_many_func(left_tile_pixels, raw_right_tiles, tail_count, t_results);
+            load_tiles_pixels_threads((const Tile* const * const)right_tiles_for_load + t_offset, tail_count, cache_info, arp, t_raw_right_tiles);
+
+            while(t_cb.one_with_many_func(left_tile_pixels, t_raw_right_tiles, tail_count, t_results) == TASK_FAILED);
 
             for (unsigned int i = 0; i < tail_count; ++i) {
                 push_edge_to_cache(keys_for_load[t_offset + i], t_results[i], cache_info);
                 results[index_mapping[t_offset + i]] = t_results[i];
             }
+
+            t_cb.memory_deallocator(t_raw_right_tiles);
         }
     }
 
     free(left_tile_pixels);
-    free(raw_right_tiles);
 }
 
 void tile_destructor(void* data) {
@@ -385,13 +398,17 @@ void tile_destructor(void* data) {
 }
 
 CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
-    CompareBackend cb = { NULL, NULL };
+    CompareBackend cb = { NULL, NULL, NULL, NULL };
 
     if (type == CPU) {
         cb.one_with_one_func = &compare_images_one_with_one_cpu;
         cb.one_with_many_func = &compare_images_one_with_many_cpu;
+
+        cb.memory_allocator = &cpu_backend_memory_allocator;
+        cb.memory_deallocator = &cpu_backend_memory_deallocator;
     } else if(type == CUDA_GPU) {
-//        cb.one_with_one_func = &compare_one_image_with_others;
+        cb.memory_allocator = &gpu_backend_memory_allocator;
+        cb.memory_deallocator = &gpu_backend_memory_deallocator;
 
         if (count < get_max_tiles_count_per_stream()) {
             cb.one_with_many_func = &compare_one_image_with_others;

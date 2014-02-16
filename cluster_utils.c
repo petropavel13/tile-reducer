@@ -114,24 +114,66 @@ void delete_result_slot(ResultSlot slot) {
     slot.is_empty = 1;
 }
 
-void clusterize(GenericNode* const all_tiles,
+
+void clusterize_simple(GenericNode *const all_tiles,
                 const unsigned int all_tiles_count,
                 const AppRunParams arp,
                 const DbInfo* const db_info,
                 CacheInfo* const cache_info) {
-    materialize_tile_color_count_wo_persistent(db_info);
+    unsigned int* const not_persistent_ids = malloc(sizeof(unsigned int) * all_tiles_count);
 
     clear_working_set(db_info);
-    create_working_set_wo_persistent_records_w_max_diff(db_info, arp.max_diff_pixels);
+    create_working_set_wo_persistent_ids(db_info);
 
-    unsigned int working_set_count = 0;
-    unsigned int* const working_set_ids = (unsigned int*)malloc(sizeof(unsigned int) * all_tiles_count);
+    unsigned int not_persistent_count = 0;
 
-    read_working_set_tiles_ids(db_info, working_set_ids, &working_set_count);
+    read_working_set_ids(db_info, not_persistent_ids, &not_persistent_count);
 
-    GenericNode* free_tiles = create_tiles_tree_from_tiles_ids(all_tiles, working_set_ids, working_set_count);
+    Tile** const not_persistent_tiles = malloc(sizeof(Tile*) * not_persistent_count);
 
-    free(working_set_ids);
+    for (unsigned int i = 0; i < not_persistent_count; ++i) {
+        not_persistent_tiles[i] = find(all_tiles, not_persistent_ids[i])->data;
+    }
+
+    free(not_persistent_ids);
+
+    GenericNode* cached_relaterd_results = NULL;
+
+    unsigned int* t_related_ids = malloc(sizeof(unsigned int) * not_persistent_count);
+    unsigned int t_related_count = 0;
+    Tile** t_related_tiles = malloc(sizeof(Tile*) * not_persistent_count);
+
+    Tile* t_current;
+
+    GenericNode* free_tiles = NULL;
+
+    for (unsigned int i = 0; i < not_persistent_count; ++i) {
+        t_current = not_persistent_tiles[i];
+
+        if (find(cached_relaterd_results, t_current->tile_id) != NULL) {
+            free_tiles = insert(free_tiles, t_current->tile_id, t_current);
+            continue;
+        }
+
+        read_related_tiles_ids(db_info, t_current->tile_id, t_related_ids, &t_related_count, arp.max_diff_pixels);
+
+        if (t_related_count == 0) {
+            continue;
+        }
+
+        for (unsigned int j = 0; j < t_related_count; ++j) {
+            t_related_tiles[j] = find(all_tiles, t_related_ids[j])->data;
+        }
+
+        if (check_has_real_related(t_current, (const Tile* const * const)t_related_tiles, t_related_count, &cached_relaterd_results, arp, cache_info) == 1) {
+            free_tiles = insert(free_tiles, t_current->tile_id, t_current);
+        }
+    }
+
+    free(t_related_ids);
+    free(t_related_tiles);
+
+    destroy_tree(cached_relaterd_results, NULL);
 
     GenericNode* used_tiles = create_node(0, NULL); // dummy
 
@@ -140,89 +182,18 @@ void clusterize(GenericNode* const all_tiles,
 
     read_persistent_groups(db_info, &persistent_groups_leaders_ids, &persistent_groups_count);
 
-    TileGroupsSequence* const tile_group_sequence = create_tiles_groups_sequence_from_ids(all_tiles, persistent_groups_leaders_ids, persistent_groups_count);
+    Tile** const groups = malloc(sizeof(Tile*) * (not_persistent_count + persistent_groups_count));
 
-    BindedTilesSequence* const binded_tiles_sequence = (BindedTilesSequence*)malloc(sizeof(BindedTilesSequence));
+    for (unsigned int i = 0; i < persistent_groups_count; ++i) {
+        groups[i] = (Tile*) find(all_tiles, persistent_groups_leaders_ids[i])->data;
+    }
+
+    BindedTilesSequence* const binded_tiles_sequence = malloc(sizeof(BindedTilesSequence));
     binded_tiles_sequence->item = NULL;
     binded_tiles_sequence->next = NULL;
 
-    TilesSequence* t_tiles_sequence_from_free = (TilesSequence*)malloc(sizeof(TilesSequence));
-    t_tiles_sequence_from_free->tile = NULL;
-    t_tiles_sequence_from_free->next = NULL;
 
-    TilesSequence* t_last = make_tile_sequence_from_tree(free_tiles, t_tiles_sequence_from_free);
-
-    TilesSequence* t_tiles_sequence = t_tiles_sequence_from_free;
-
-    GenericNode* related_tiles = NULL;
-
-    unsigned int* const related_ids = (unsigned int*)malloc(sizeof(unsigned int) * working_set_count);
-
-    unsigned int related_count = 0;
-
-    TilesSequence* t_related_sequence = NULL;
-
-    while (t_tiles_sequence != NULL && t_tiles_sequence != t_last) {
-        read_related_tiles_ids(db_info, t_tiles_sequence->tile->tile_id, related_ids, &related_count, arp.max_diff_pixels);
-
-        t_related_sequence = create_tiles_sequence_from_tile_ids(free_tiles, related_ids, related_count);
-
-        if(t_related_sequence == NULL) {
-            working_set_count--;
-            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, NULL);
-        } else {
-            clean_related_group(t_tiles_sequence->tile, &t_related_sequence, related_count, arp, cache_info);
-            related_tiles = insert(related_tiles, t_tiles_sequence->tile->tile_id, t_related_sequence);
-        }
-
-        t_tiles_sequence = t_tiles_sequence->next;
-    }
-
-    delete_tiles_sequence(t_tiles_sequence_from_free);
-
-    t_tiles_sequence_from_free = (TilesSequence*)malloc(sizeof(TilesSequence));
-    t_tiles_sequence_from_free->tile = NULL;
-    t_tiles_sequence_from_free->next = NULL;
-
-    t_last = make_tile_sequence_from_tree(free_tiles, t_tiles_sequence_from_free);
-
-    t_tiles_sequence = t_tiles_sequence_from_free;
-
-    while (t_tiles_sequence != NULL && t_tiles_sequence != t_last) {
-        t_related_sequence = (TilesSequence*) find(related_tiles, t_tiles_sequence->tile->tile_id)->data;
-
-        if(t_related_sequence == NULL) {
-            working_set_count--;
-            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, NULL);
-            related_tiles = remove_node(related_tiles, t_tiles_sequence->tile->tile_id, &tile_sequence_destructor);
-        }
-
-        t_tiles_sequence = t_tiles_sequence->next;
-    }
-
-    unsigned long f_count = 0;
-    calc_elements_count(free_tiles, &f_count);
-
-    free(related_ids);
-
-//    const NodeResult best_result = calc_node_result(tile_group_sequence,
-//                                                    persistent_groups_count,
-//                                                    binded_tiles_sequence,
-//                                                    &used_tiles,
-//                                                    &free_tiles,
-//                                                    working_set_count,
-//                                                    (Tile*) free_tiles->data,
-//                                                    related_tiles,
-//                                                    max_diff_pixels,
-//                                                    cache_info);
-
-    TileGroupsSequence* last_group_in_seq = tile_group_sequence;
-
-    while (last_group_in_seq->next != NULL) {
-        last_group_in_seq = last_group_in_seq->next;
-    }
-
-    hungry_by_groups(last_group_in_seq, binded_tiles_sequence, &used_tiles, &free_tiles, (Tile*) free_tiles->data, arp.max_diff_pixels, cache_info);
+    simple_by_groups(groups, &persistent_groups_count, binded_tiles_sequence, &used_tiles, &free_tiles, (Tile*) free_tiles->data, arp.max_diff_pixels, cache_info);
 
     BindedTilesSequence* t_binded_sequence = binded_tiles_sequence->next;
 
@@ -235,16 +206,239 @@ void clusterize(GenericNode* const all_tiles,
     flush_db_buffer(db_info);
 
 
-    delete_tile_groups_sequence(tile_group_sequence);
+    free(groups);
     delete_binded_tiles_sequence(binded_tiles_sequence);
 
     destroy_tree(free_tiles, NULL);
     destroy_tree(used_tiles, NULL);
-    destroy_tree(related_tiles, &tile_sequence_destructor);
-
-
-    delete_tiles_sequence(t_tiles_sequence_from_free);
 }
+
+unsigned char check_has_real_related(const Tile* const tile,
+                                     const Tile* const * const related_tiles,
+                                     const unsigned int related_count,
+                                     GenericNode** const cached_related,
+                                     const AppRunParams arp,
+                                     CacheInfo* const cache_info) {
+    if (related_count == 1) {
+        unsigned char yes = calc_diff(tile, related_tiles[0], cache_info) <= arp.max_diff_pixels;
+
+        if (yes) {
+            *cached_related = insert(*cached_related, related_tiles[0]->tile_id, NULL);
+        }
+
+        return yes;
+    }
+
+    unsigned short* const diff_results = malloc(sizeof(unsigned short) * related_count);
+
+    calc_diff_one_with_many(tile, related_tiles, related_count, cache_info, arp, diff_results);
+
+    unsigned char yes = 0;
+
+    for (unsigned int i = 0; i < related_count; ++i) {
+        if (diff_results[i] <= arp.max_diff_pixels) {
+            *cached_related = insert(*cached_related, related_tiles[i]->tile_id, NULL);
+            yes = 1;
+        }
+    }
+
+    free(diff_results);
+
+    return yes;
+}
+
+void simple_by_groups(Tile** const groups,
+                      unsigned int *offset,
+                      BindedTilesSequence* binded_tiles_sequence,
+                      GenericNode** used_tiles,
+                      GenericNode** not_used,
+                      Tile *const tile,
+                      const unsigned int max_diff_pixels,
+                      CacheInfo* const cache_info) {
+    migrate_tile(not_used, used_tiles, tile->tile_id);
+
+    const unsigned char left_node_result = simple_by_groups_left(groups,
+                                                                 offset,
+                                                                 binded_tiles_sequence,
+                                                                 tile,
+                                                                 max_diff_pixels,
+                                                                 cache_info);
+    if(left_node_result) {
+        if(*not_used != NULL) {
+            simple_by_groups(groups, offset, binded_tiles_sequence->next, used_tiles, not_used, (Tile*)(*not_used)->data, max_diff_pixels, cache_info);
+        }
+    } else {
+        groups[(*offset)++] = tile;
+
+        if(*not_used != NULL) {
+            simple_by_groups(groups, offset, binded_tiles_sequence, used_tiles, not_used, (Tile*)(*not_used)->data, max_diff_pixels, cache_info);
+        }
+    }
+
+}
+
+unsigned char simple_by_groups_left(Tile** const groups,
+                                    unsigned int* const offset,
+                                    BindedTilesSequence* binded_tiles_sequence,
+                                    Tile* const tile,
+                                    const unsigned int max_diff_pixels,
+                                    CacheInfo* const cache_info) {
+    Tile* t_group_leader;
+
+    unsigned short int t_diff_result = USHORT_MAX;
+
+    // TODO compare one with others!
+
+    for (unsigned int i = 0; i < (*offset); ++i) {
+        t_group_leader = groups[i];
+
+        t_diff_result = calc_diff(tile, t_group_leader, cache_info);
+
+        if(t_diff_result <= max_diff_pixels) {
+            binded_tiles_sequence->next = malloc(sizeof(BindedTilesSequence));
+            binded_tiles_sequence->next->item = malloc(sizeof(BindedTile));
+            binded_tiles_sequence->next->item->group_leader_tile = t_group_leader;
+            binded_tiles_sequence->next->item->tile = tile;
+            binded_tiles_sequence->next->next = NULL;
+
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+//void clusterize(GenericNode* const all_tiles,
+//                const unsigned int all_tiles_count,
+//                const AppRunParams arp,
+//                const DbInfo* const db_info,
+//                CacheInfo* const cache_info) {
+//    unsigned int* const possible_leaders_ids = malloc(sizeof(unsigned int) * all_tiles_count);
+
+//    materialize_tile_color_count_wo_persistent(db_info);
+
+//    unsigned int possible_leaders_count = 0;
+
+//    read_tile_color_count_tiles_ids(db_info, possible_leaders_ids, &possible_leaders_count);
+
+//    GenericNode* free_tiles = create_tiles_tree_from_tiles_ids(all_tiles, possible_leaders_ids, possible_leaders_count);
+
+//    free(possible_leaders_ids);
+
+//    GenericNode* used_tiles = create_node(0, NULL); // dummy
+
+//    unsigned int* persistent_groups_leaders_ids = NULL;
+//    unsigned int persistent_groups_count = 0;
+
+//    read_persistent_groups(db_info, &persistent_groups_leaders_ids, &persistent_groups_count);
+
+//    TileGroupsSequence* const tile_group_sequence = create_tiles_groups_sequence_from_ids(all_tiles, persistent_groups_leaders_ids, persistent_groups_count);
+
+//    BindedTilesSequence* const binded_tiles_sequence = (BindedTilesSequence*)malloc(sizeof(BindedTilesSequence));
+//    binded_tiles_sequence->item = NULL;
+//    binded_tiles_sequence->next = NULL;
+
+//    TilesSequence* t_tiles_sequence_from_free = (TilesSequence*)malloc(sizeof(TilesSequence));
+//    t_tiles_sequence_from_free->tile = NULL;
+//    t_tiles_sequence_from_free->next = NULL;
+
+//    TilesSequence* t_last = make_tile_sequence_from_tree(free_tiles, t_tiles_sequence_from_free);
+
+//    TilesSequence* t_tiles_sequence = t_tiles_sequence_from_free;
+
+//    GenericNode* related_tiles = NULL;
+
+//    unsigned int* const related_ids = malloc(sizeof(unsigned int) * possible_leaders_count);
+
+//    unsigned int related_count = 0;
+
+//    TilesSequence* t_related_sequence = NULL;
+
+//    while (t_tiles_sequence != NULL && t_tiles_sequence != t_last) {
+//        read_related_tiles_ids(db_info, t_tiles_sequence->tile->tile_id, related_ids, &related_count, arp.max_diff_pixels);
+
+//        t_related_sequence = create_tiles_sequence_from_tile_ids(free_tiles, related_ids, related_count);
+
+//        if(t_related_sequence == NULL) {
+//            possible_leaders_count--;
+//            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, NULL);
+//        } else {
+//            clean_related_group(t_tiles_sequence->tile, &t_related_sequence, related_count, arp, cache_info);
+//            related_tiles = insert(related_tiles, t_tiles_sequence->tile->tile_id, t_related_sequence);
+//        }
+
+//        t_tiles_sequence = t_tiles_sequence->next;
+//    }
+
+//    delete_tiles_sequence(t_tiles_sequence_from_free);
+
+//    t_tiles_sequence_from_free = (TilesSequence*)malloc(sizeof(TilesSequence));
+//    t_tiles_sequence_from_free->tile = NULL;
+//    t_tiles_sequence_from_free->next = NULL;
+
+//    t_last = make_tile_sequence_from_tree(free_tiles, t_tiles_sequence_from_free);
+
+//    t_tiles_sequence = t_tiles_sequence_from_free;
+
+//    while (t_tiles_sequence != NULL && t_tiles_sequence != t_last) {
+//        t_related_sequence = (TilesSequence*) find(related_tiles, t_tiles_sequence->tile->tile_id)->data;
+
+//        if(t_related_sequence == NULL) {
+//            possible_leaders_count--;
+//            free_tiles = remove_node(free_tiles, t_tiles_sequence->tile->tile_id, NULL);
+//            related_tiles = remove_node(related_tiles, t_tiles_sequence->tile->tile_id, &tile_sequence_destructor);
+//        }
+
+//        t_tiles_sequence = t_tiles_sequence->next;
+//    }
+
+////    unsigned long f_count = 0;
+////    calc_elements_count(free_tiles, &f_count);
+
+//    free(related_ids);
+
+////    const NodeResult best_result = calc_node_result(tile_group_sequence,
+////                                                    persistent_groups_count,
+////                                                    binded_tiles_sequence,
+////                                                    &used_tiles,
+////                                                    &free_tiles,
+////                                                    working_set_count,
+////                                                    (Tile*) free_tiles->data,
+////                                                    related_tiles,
+////                                                    max_diff_pixels,
+////                                                    cache_info);
+
+//    TileGroupsSequence* last_group_in_seq = tile_group_sequence;
+
+//    while (last_group_in_seq->next != NULL) {
+//        last_group_in_seq = last_group_in_seq->next;
+//    }
+
+//    simple_by_groups(last_group_in_seq, binded_tiles_sequence, &used_tiles, &free_tiles, (Tile*) free_tiles->data, arp.max_diff_pixels, cache_info);
+
+//    BindedTilesSequence* t_binded_sequence = binded_tiles_sequence->next;
+
+//    while (t_binded_sequence->next != NULL) {
+//        add_tile_to_group_using_buffer(db_info, t_binded_sequence->item->group_leader_tile->tile_id, t_binded_sequence->item->tile->tile_id);
+
+//        t_binded_sequence = t_binded_sequence->next;
+//    }
+
+//    flush_db_buffer(db_info);
+
+
+//    delete_tile_groups_sequence(tile_group_sequence);
+//    delete_binded_tiles_sequence(binded_tiles_sequence);
+
+//    destroy_tree(free_tiles, NULL);
+//    destroy_tree(used_tiles, NULL);
+//    destroy_tree(related_tiles, &tile_sequence_destructor);
+
+
+//    delete_tiles_sequence(t_tiles_sequence_from_free);
+//}
+
+
 
 void clean_related_group(const Tile* const tile,
                          TilesSequence** related_sequence_for_tile,
@@ -612,64 +806,7 @@ NodeResult calc_node_result_group_selected(TileGroupsSequence* groups_sequence,
 }
 
 
-void hungry_by_groups(TileGroupsSequence* groups_sequence,
-                            BindedTilesSequence* binded_tiles_sequence,
-                            GenericNode** used_tiles,
-                            GenericNode** not_used,
-                            Tile *const tile,
-                            const unsigned int max_diff_pixels,
-                              CacheInfo* const cache_info) {
-    migrate_tile(not_used, used_tiles, tile->tile_id);
 
-    const unsigned char left_node_result = hungry_by_groups_left(groups_sequence,
-                                                              binded_tiles_sequence,
-                                                              tile,
-                                                              max_diff_pixels,
-                                                              cache_info);
-    if(left_node_result) {
-        if(*not_used != NULL) {
-            hungry_by_groups(groups_sequence, binded_tiles_sequence->next, used_tiles, not_used, (Tile*)(*not_used)->data, max_diff_pixels, cache_info);
-        }
-    } else {
-        groups_sequence->next = (TileGroupsSequence*)malloc(sizeof(TileGroupsSequence));
-        groups_sequence->next->first = groups_sequence->first;
-        groups_sequence->next->leader_tile = tile;
-        groups_sequence->next->next = NULL;
-
-        if(*not_used != NULL) {
-            hungry_by_groups(groups_sequence->next, binded_tiles_sequence, used_tiles, not_used, (Tile*)(*not_used)->data, max_diff_pixels, cache_info);
-        }
-    }
-
-}
-
-unsigned char hungry_by_groups_left(TileGroupsSequence* groups_sequence,
-                                 BindedTilesSequence* binded_tiles_sequence,
-                                 Tile* const tile,
-                                 const unsigned int max_diff_pixels,
-                                 CacheInfo* const cache_info) {
-    TileGroupsSequence* t_group_sequence = groups_sequence->first;
-
-    unsigned short int t_diff_result = USHORT_MAX;
-
-    while (t_group_sequence != NULL) {
-        t_diff_result = calc_diff(tile, t_group_sequence->leader_tile, cache_info);
-
-        if(t_diff_result <= max_diff_pixels) {
-            binded_tiles_sequence->next = (BindedTilesSequence*)malloc(sizeof(BindedTilesSequence));
-            binded_tiles_sequence->next->item = (BindedTile*)malloc(sizeof(BindedTile));
-            binded_tiles_sequence->next->item->group_leader_tile = t_group_sequence->leader_tile;
-            binded_tiles_sequence->next->item->tile = tile;
-            binded_tiles_sequence->next->next = NULL;
-
-            return 1;
-        }
-
-        t_group_sequence = t_group_sequence->next;
-    }
-
-    return 0;
-}
 
 TilesSequence* make_tile_sequence_from_tree(const GenericNode* const node, TilesSequence* const sequence) {
     if(node == NULL) {

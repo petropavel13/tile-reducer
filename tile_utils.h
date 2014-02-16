@@ -37,6 +37,9 @@ typedef struct CompareBackend {
                                const unsigned char* const,
                                const unsigned int,
                                unsigned short* const);
+
+    void* (*memory_allocator)(size_t);
+    void (*memory_deallocator)(void*);
 } CompareBackend;
 
 typedef enum CompareBackendType { CPU, CUDA_GPU } CompareBackendType;
@@ -86,6 +89,9 @@ TaskStatus compare_images_one_with_many_cpu(const unsigned char* const left_raw_
                                             const unsigned char* const right_raw_images,
                                             const unsigned int right_images_count,
                                             unsigned short* const diff_results);
+
+void* cpu_backend_memory_allocator(size_t bytes);
+void cpu_backend_memory_deallocator(void* ptr);
 
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
