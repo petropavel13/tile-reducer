@@ -344,7 +344,13 @@ void calc_diff_one_with_many(const Tile* const left_tile,
     for (unsigned int i = 0; i < loops_count; ++i) {
         load_tiles_pixels_threads((const Tile* const * const)right_tiles_for_load + t_offset, tiles_per_mem_loop, cache_info, arp, t_raw_right_tiles);
 
-        while(t_cb.one_with_many_func(left_tile_pixels, t_raw_right_tiles, tiles_per_mem_loop, t_results) == TASK_FAILED);
+        if (t_cb.one_with_many_func(left_tile_pixels, t_raw_right_tiles, tiles_per_mem_loop, t_results) == TASK_FAILED) {
+            // when error occur cudaDeviceReset destroy all associated resources
+            // so we need to call this function again
+            t_cb.memory_deallocator(t_raw_right_tiles);
+            calc_diff_one_with_many(left_tile, right_tiles,right_tiles_count, cache_info, arp, results);
+            return;
+        }
 
         for (unsigned int j = 0; j < tiles_per_mem_loop; ++j) {
             push_edge_to_cache(keys_for_load[t_offset + j], t_results[j], cache_info);
@@ -377,7 +383,13 @@ void calc_diff_one_with_many(const Tile* const left_tile,
 
             load_tiles_pixels_threads((const Tile* const * const)right_tiles_for_load + t_offset, tail_count, cache_info, arp, t_raw_right_tiles);
 
-            while(t_cb.one_with_many_func(left_tile_pixels, t_raw_right_tiles, tail_count, t_results) == TASK_FAILED);
+            if (t_cb.one_with_many_func(left_tile_pixels, t_raw_right_tiles, tail_count, t_results) == TASK_FAILED) {
+                // when error occur cudaDeviceReset destroy all associated resources
+                // so we need to call this function again
+                t_cb.memory_deallocator(t_raw_right_tiles);
+                calc_diff_one_with_many(left_tile, right_tiles,right_tiles_count, cache_info, arp, results);
+                return;
+            }
 
             for (unsigned int i = 0; i < tail_count; ++i) {
                 push_edge_to_cache(keys_for_load[t_offset + i], t_results[i], cache_info);

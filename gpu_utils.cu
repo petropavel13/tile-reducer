@@ -184,7 +184,6 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
 
         if (error != cudaSuccess) {
             cudaDeviceSynchronize();
-            cudaDeviceReset();
 
             goto exit;
         } else {
@@ -194,25 +193,31 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
 
     exit:
 
-    for (int j = 0; j < streams_count; ++j) {
-       cudaStreamDestroy(streams[j]);
+    if (error == cudaSuccess) {
+        for (int j = 0; j < streams_count; ++j) {
+           cudaStreamDestroy(streams[j]);
+        }
+
+        if (pinned_left_raw_image != NULL) {
+            cudaFreeHost(pinned_left_raw_image);
+        }
+
+        cudaFree(d_left_image);
+
+        for (unsigned int j = 0; j < streams_count; ++j) {
+            cudaFree(sPointers[j].right_raw_images);
+            cudaFree(sPointers[j].diff_results);
+            cudaFree(sPointers[j].diff_convolution_z);
+            cudaFree(sPointers[j].diff_convolution_y);
+            cudaFree(sPointers[j].diff_convolution_x);
+        }
+
+        return TASK_DONE;
     }
 
-    if (pinned_left_raw_image != NULL) {
-        cudaFreeHost(pinned_left_raw_image);
-    }
+    cudaDeviceReset();
 
-    cudaFree(d_left_image);
-
-    for (unsigned int j = 0; j < streams_count; ++j) {
-        cudaFree(sPointers[j].right_raw_images);
-        cudaFree(sPointers[j].diff_results);
-        cudaFree(sPointers[j].diff_convolution_z);
-        cudaFree(sPointers[j].diff_convolution_y);
-        cudaFree(sPointers[j].diff_convolution_x);
-    }
-
-    return error == cudaSuccess ? TASK_DONE : TASK_FAILED;
+    return TASK_FAILED;
 }
 
 
@@ -240,15 +245,20 @@ TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_ima
 
     exit:
 
-    cudaFree(dp.left_raw_image);
-    cudaFree(dp.right_raw_images);
-    cudaFree(dp.diff_results);
-    cudaFree(dp.diff_convolution_z);
-    cudaFree(dp.diff_convolution_y);
-    cudaFree(dp.diff_convolution_x);
+    if (error == cudaSuccess) {
+        cudaFree(dp.left_raw_image);
+        cudaFree(dp.right_raw_images);
+        cudaFree(dp.diff_results);
+        cudaFree(dp.diff_convolution_z);
+        cudaFree(dp.diff_convolution_y);
+        cudaFree(dp.diff_convolution_x);
 
+        return TASK_DONE;
+    }
 
-    return error == cudaSuccess ? TASK_DONE : TASK_FAILED;
+    cudaDeviceReset();
+
+    return TASK_FAILED;
 }
 
 void* gpu_backend_memory_allocator(size_t bytes) {
