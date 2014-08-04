@@ -6,17 +6,61 @@
 #define MIN_TILES_PER_THREAD 256
 #define MIN_TILES_FOR_MULTITHREADING (MIN_TILES_PER_THREAD * 2)
 
-LoadTilesParams make_load_params(const Tile* const * const tiles,
-                                 const unsigned int count,
-                                 unsigned char ** const raw_output,
-                                 unsigned char ** const raw_cache_output) {
-    LoadTilesParams ltp;
-    ltp.tiles = (Tile**)tiles;
-    ltp.count = count;
-    ltp.raw_output = raw_output;
-    ltp.raw_cache_output = raw_cache_output;
+typedef struct CompareBackend {
+    unsigned short (*one_with_one_func)(const unsigned char* const,
+                                        const unsigned char* const);
 
-    return ltp;
+    TaskStatus (*one_with_many_func)(const unsigned char* const,
+                               const unsigned char* const,
+                               const unsigned int,
+                               unsigned short* const);
+
+    void* (*memory_allocator)(size_t);
+    void (*memory_deallocator)(void*);
+} CompareBackend;
+
+typedef enum CompareBackendType { CPU, CUDA_GPU } CompareBackendType;
+
+typedef struct LoadTilesParams {
+    Tile** tiles;
+    unsigned int count;
+    unsigned char** raw_output;
+    unsigned char** raw_cache_output;
+} LoadTilesParams;
+
+LoadTilesParams make_load_params(const Tile * const * const tiles,
+                                 const unsigned int count,
+                                 unsigned char** const raw_output,
+                                 unsigned char** const raw_cache_output) {
+    return (LoadTilesParams) {
+        .tiles = (Tile**)tiles,
+        .count = count,
+        .raw_output = raw_output,
+        .raw_cache_output = raw_cache_output,
+    };
+}
+
+CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
+    CompareBackend cb = { NULL, NULL, NULL, NULL };
+
+    if (type == CPU) {
+        cb.one_with_one_func = &compare_images_one_with_one_cpu;
+        cb.one_with_many_func = &compare_images_one_with_many_cpu;
+
+        cb.memory_allocator = &cpu_backend_memory_allocator;
+        cb.memory_deallocator = &cpu_backend_memory_deallocator;
+    } else if(type == CUDA_GPU) {
+        cb.memory_allocator = &gpu_backend_memory_allocator;
+        cb.memory_deallocator = &gpu_backend_memory_deallocator;
+
+        if (count < get_max_tiles_count_per_stream()) {
+            cb.one_with_many_func = &compare_one_image_with_others;
+        } else {
+            cb.one_with_many_func = &compare_one_image_with_others_streams;
+        }
+    }
+
+    return cb;
 }
 
 TileFile* read_tile(const char* file_path) {
@@ -408,29 +452,5 @@ void tile_destructor(void* data) {
     tile_file_destructor(t->tile_file);
     free(t);
 }
-
-CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
-    CompareBackend cb = { NULL, NULL, NULL, NULL };
-
-    if (type == CPU) {
-        cb.one_with_one_func = &compare_images_one_with_one_cpu;
-        cb.one_with_many_func = &compare_images_one_with_many_cpu;
-
-        cb.memory_allocator = &cpu_backend_memory_allocator;
-        cb.memory_deallocator = &cpu_backend_memory_deallocator;
-    } else if(type == CUDA_GPU) {
-        cb.memory_allocator = &gpu_backend_memory_allocator;
-        cb.memory_deallocator = &gpu_backend_memory_deallocator;
-
-        if (count < get_max_tiles_count_per_stream()) {
-            cb.one_with_many_func = &compare_one_image_with_others;
-        } else {
-            cb.one_with_many_func = &compare_one_image_with_others_streams;
-        }
-    }
-
-    return cb;
-}
-
 
 

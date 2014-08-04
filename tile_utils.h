@@ -29,34 +29,6 @@ typedef struct Tile {
     TileFile* tile_file;
 } Tile;
 
-typedef struct CompareBackend {
-    unsigned short (*one_with_one_func)(const unsigned char* const,
-                                        const unsigned char* const);
-
-    TaskStatus (*one_with_many_func)(const unsigned char* const,
-                               const unsigned char* const,
-                               const unsigned int,
-                               unsigned short* const);
-
-    void* (*memory_allocator)(size_t);
-    void (*memory_deallocator)(void*);
-} CompareBackend;
-
-typedef enum CompareBackendType { CPU, CUDA_GPU } CompareBackendType;
-
-typedef struct LoadTilesParams {
-    Tile** tiles;
-    unsigned int count;
-    unsigned char** raw_output;
-    unsigned char** raw_cache_output;
-} LoadTilesParams;
-
-LoadTilesParams make_load_params(const Tile * const * const tiles,
-                                 const unsigned int count,
-                                 unsigned char** const raw_output,
-                                 unsigned char** const raw_cache_output);
-
-CompareBackend make_backend(CompareBackendType type, const unsigned int count);
 
 TileFile* read_tile(const char* file_path);
 

@@ -19,7 +19,7 @@ typedef struct TilesColorsTree {
 
     void(*index_callback)(unsigned char);
     unsigned long current_index;
-    unsigned char last_index_persent;
+    unsigned char last_index_percent;
 
     void(*flush_callback)(unsigned char);
     unsigned long current_flush;
@@ -37,10 +37,17 @@ typedef struct TCTParams {
 } TCTParams;
 
 
-TCTParams make_tct_params(GenericNode * const tiles_tree,
+static inline TCTParams make_tct_params(GenericNode * const tiles_tree,
                           void(*index_callback)(unsigned char),
                           void(*flush_callback)(unsigned char),
-                          DbInfo* const db_info);
+                          DbInfo* const db_info) {
+    return (TCTParams) {
+            .tiles_tree = tiles_tree,
+            .index_callback = index_callback,
+            .flush_callback = flush_callback,
+            .db_info  = db_info,
+    };
+}
 
 TilesColorsTree* create_tiles_colors_tree(const GenericNode* const tiles_tree,
                                           DbInfo * const db_info,

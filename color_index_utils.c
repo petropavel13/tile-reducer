@@ -1,15 +1,5 @@
 #include "color_index_utils.h"
 
-
-TCTParams make_tct_params(GenericNode* const tiles_tree,
-                          void(*index_callback)(unsigned char),
-                          void(*flush_callback)(unsigned char),
-                          DbInfo * const db_info) {
-    TCTParams params = { tiles_tree, index_callback, flush_callback, db_info };
-
-    return params;
-}
-
 TilesColorsTree* create_tiles_colors_tree(const GenericNode* const tiles_tree,
                                           DbInfo * const db_info,
                                           void(*index_callback)(unsigned char),
@@ -26,7 +16,7 @@ TilesColorsTree* create_tiles_colors_tree(const GenericNode* const tiles_tree,
 
     tiles_colors_tree->index_callback = index_callback;
     tiles_colors_tree->current_index = 0;
-    tiles_colors_tree->last_index_persent = 0;
+    tiles_colors_tree->last_index_percent = 0;
 
     tiles_colors_tree->flush_callback = flush_callback;
     tiles_colors_tree->current_flush = 0;
@@ -67,8 +57,8 @@ void index_tree(TilesColorsTree* const tiles_colors_tree, const GenericNode* con
         if(tiles_colors_tree->index_callback != NULL) {
             const unsigned char current_percent = (++tiles_colors_tree->current_index / (tiles_colors_tree->tiles_count / 100.0));
 
-            if(current_percent != tiles_colors_tree->last_index_persent) {
-                tiles_colors_tree->index_callback(tiles_colors_tree->last_index_persent = current_percent);
+            if(current_percent != tiles_colors_tree->last_index_percent) {
+                tiles_colors_tree->index_callback(tiles_colors_tree->last_index_percent = current_percent);
             }
         }
 

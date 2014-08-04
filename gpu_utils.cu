@@ -5,6 +5,41 @@
 
 #include "math.h"
 
+#include "tile_utils.h"
+
+typedef struct DevicePointers {
+    unsigned char* left_raw_image;
+    unsigned char* right_raw_images;
+    size_t right_raw_images_pitch;
+
+    unsigned char* diff_results;
+    size_t diff_results_pitch;
+
+    unsigned char* diff_convolution_z;
+    size_t diff_convolution_z_pitch;
+
+    unsigned short int* diff_convolution_y;
+    size_t diff_convolution_y_pitch;
+
+    unsigned short int* diff_convolution_x;
+} DevicePointers;
+
+
+typedef struct RunParams {
+    dim3 grid_dim_diff;
+    dim3 block_dim_diff;
+
+    dim3 grid_dim_convolution_z;
+    dim3 block_dim_convolution_z;
+
+    dim3 grid_dim_convolution_y;
+    dim3 block_dim_convolution_y;
+
+    dim3 grid_dim_convolution_x;
+    dim3 block_dim_convolution_x;
+} RunParams;
+
+
 #define H2D cudaMemcpyHostToDevice
 #define D2H cudaMemcpyDeviceToHost
 
@@ -23,6 +58,45 @@
         error_var = cuda_error;\
         goto leave_label; \
     }
+
+
+static inline RunParams make_run_params(const unsigned int stream_size) {
+    RunParams rp;
+
+    rp.grid_dim_diff = dim3(TILE_WIDTH, stream_size); // 256 x 256..1 dep rbs
+    rp.block_dim_diff = dim3(4, TILE_HEIGHT);
+
+
+    rp.grid_dim_convolution_z = dim3(TILE_WIDTH / 4, stream_size); // 64 x 256..1 dep rbs
+    rp.block_dim_convolution_z = dim3(4, TILE_HEIGHT);
+
+
+    rp.grid_dim_convolution_y = dim3(TILE_WIDTH, stream_size); // 256 x 256..0 dep rbs
+    rp.block_dim_convolution_y = dim3(TILE_HEIGHT, 1);
+
+
+    rp.grid_dim_convolution_x = dim3(stream_size, 1); // 256..0 x 1 dep rbs
+    rp.block_dim_convolution_x = dim3(TILE_WIDTH, 1);
+
+    return rp;
+}
+
+cudaError_t run_compare(RunParams rp,
+                       DevicePointers dp,
+                       cudaStream_t stream,
+                       const unsigned int right_images_count,
+                       unsigned short int* const diff_results) {
+    sub_one_cube_with_others<<<rp.grid_dim_diff, rp.block_dim_diff, 0, stream>>>(dp.left_raw_image, dp.right_raw_images, dp.right_raw_images_pitch, dp.diff_results, dp.diff_results_pitch);
+
+    sum_z_dimension_zero_or_one<<<rp.grid_dim_convolution_z, rp.block_dim_convolution_z, 0, stream>>>(dp.diff_results, dp.diff_results_pitch, dp.diff_convolution_z, dp.diff_convolution_z_pitch);
+
+    sum_y_dimension<<<rp.grid_dim_convolution_y, rp.block_dim_convolution_y, SHARED_MEM_SIZE_HEIGHT, stream>>>(dp.diff_convolution_z, dp.diff_convolution_z_pitch, dp.diff_convolution_y, dp.diff_convolution_y_pitch);
+
+    sum_x_dimension<<<rp.grid_dim_convolution_x, rp.block_dim_convolution_x, SHARED_MEM_SIZE_WIDTH, stream>>>(dp.diff_convolution_y, dp.diff_convolution_y_pitch, dp.diff_convolution_x);
+
+
+    return cudaMemcpyAsync(diff_results, dp.diff_convolution_x, DIFF_CONVOLUTION_X_SIZE * right_images_count, D2H, stream);
+}
 
 
 cudaError_t alloc_device_mem(DevicePointers* const dps,
@@ -263,54 +337,23 @@ TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_ima
 
 void* gpu_backend_memory_allocator(size_t bytes) {
     void* ptr = NULL;
-    cudaMallocHost(&ptr, bytes);
+
+    const cudaError_t cuda_error = cudaMallocHost(&ptr, bytes);
+
+    if (cuda_error != cudaSuccess) {
+        printf("cuda error at %d : %s \naction: %s \n", __LINE__, cudaGetErrorString(cuda_error), "cudaMallocHost"); \
+    }
 
     return ptr;
 }
 
 void gpu_backend_memory_deallocator(void* ptr) {
-    cudaFreeHost(ptr);
+    const cudaError_t cuda_error = cudaFreeHost(ptr);
+
+    if (cuda_error != cudaSuccess) {
+        printf("cuda error at %d : %s \naction: %s \n", __LINE__, cudaGetErrorString(cuda_error), "cudaFreeHost"); \
+    }
 }
-
-RunParams make_run_params(const unsigned int stream_size) {
-    RunParams rp;
-
-    rp.grid_dim_diff = dim3(TILE_WIDTH, stream_size); // 256 x 256..1 dep rbs
-    rp.block_dim_diff = dim3(4, TILE_HEIGHT);
-
-
-    rp.grid_dim_convolution_z = dim3(TILE_WIDTH / 4, stream_size); // 64 x 256..1 dep rbs
-    rp.block_dim_convolution_z = dim3(4, TILE_HEIGHT);
-
-
-    rp.grid_dim_convolution_y = dim3(TILE_WIDTH, stream_size); // 256 x 256..0 dep rbs
-    rp.block_dim_convolution_y = dim3(TILE_HEIGHT, 1);
-
-
-    rp.grid_dim_convolution_x = dim3(stream_size, 1); // 256..0 x 1 dep rbs
-    rp.block_dim_convolution_x = dim3(TILE_WIDTH, 1);
-
-    return rp;
-}
-
-
-cudaError_t run_compare(RunParams rp,
-                       DevicePointers dp,
-                       cudaStream_t stream,
-                       const unsigned int right_images_count,
-                       unsigned short int* const diff_results) {
-    sub_one_cube_with_others<<<rp.grid_dim_diff, rp.block_dim_diff, 0, stream>>>(dp.left_raw_image, dp.right_raw_images, dp.right_raw_images_pitch, dp.diff_results, dp.diff_results_pitch);
-
-    sum_z_dimension_zero_or_one<<<rp.grid_dim_convolution_z, rp.block_dim_convolution_z, 0, stream>>>(dp.diff_results, dp.diff_results_pitch, dp.diff_convolution_z, dp.diff_convolution_z_pitch);
-
-    sum_y_dimension<<<rp.grid_dim_convolution_y, rp.block_dim_convolution_y, SHARED_MEM_SIZE_HEIGHT, stream>>>(dp.diff_convolution_z, dp.diff_convolution_z_pitch, dp.diff_convolution_y, dp.diff_convolution_y_pitch);
-
-    sum_x_dimension<<<rp.grid_dim_convolution_x, rp.block_dim_convolution_x, SHARED_MEM_SIZE_WIDTH, stream>>>(dp.diff_convolution_y, dp.diff_convolution_y_pitch, dp.diff_convolution_x);
-
-
-    return cudaMemcpyAsync(diff_results, dp.diff_convolution_x, DIFF_CONVOLUTION_X_SIZE * right_images_count, D2H, stream);
-}
-
 
 unsigned int get_max_tiles_count_per_stream() {
     int cudaDevNumber = 0;

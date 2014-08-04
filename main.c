@@ -19,7 +19,7 @@
 
 //#define CONNECTION_STRING "dbname=tiles_db hostaddr=192.168.0.108 user=postgres port=5432 password=123"
 //#define CONNECTION_STRING "dbname=tiles_test hostaddr=172.18.36.131 user=postgres port=5432 password=123"
-#define CONNECTION_STRING "dbname=tiles_test host=/var/run/postgresql user=postgres password=123"
+#define CONNECTION_STRING "dbname=tiles_db_256 host=/var/run/postgresql user=postgres password=123"
 
 
 #define LEFT 0
@@ -216,7 +216,7 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-    clear_all_data(db_info); // DEBUG
+//    clear_all_data(db_info); // DEBUG
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
