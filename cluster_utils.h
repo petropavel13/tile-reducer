@@ -5,8 +5,6 @@
 #include "db_utils.h"
 #include "apprunparams.h"
 
-#include <stdio.h>
-
 typedef struct TilesSequence {
     Tile* tile;
     struct TilesSequence* next;

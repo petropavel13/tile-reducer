@@ -13,7 +13,7 @@ void make_persistent_groups(const DbInfo *const db_info,
 
     const Tile** const equal_candidates = (const Tile**)malloc(sizeof(Tile*) * total); // prevent many malloc/free calls
 
-    unsigned short int* const results = malloc(sizeof(unsigned short int) * total); // prevent many malloc/free calls
+    unsigned int* const results = malloc(sizeof(unsigned int) * total); // prevent many malloc/free calls
 
     unsigned int processed_count = 0;
 
@@ -229,7 +229,7 @@ unsigned char check_has_real_related(const Tile* const tile,
         return yes;
     }
 
-    unsigned short* const diff_results = malloc(sizeof(unsigned short) * related_count);
+    unsigned int* const diff_results = malloc(sizeof(unsigned int) * related_count);
 
     calc_diff_one_with_many(tile, related_tiles, related_count, cache_info, arp, diff_results);
 
@@ -285,7 +285,7 @@ unsigned char simple_by_groups_left(Tile** const groups,
                                     CacheInfo* const cache_info) {
     Tile* t_group_leader;
 
-    unsigned short int t_diff_result = USHORT_MAX;
+    unsigned int t_diff_result = TILE_PIXELS_COUNT;
 
     // TODO compare one with others!
 
@@ -455,7 +455,7 @@ void clean_related_group(const Tile* const tile,
             t_related_tile = t_related_tile->next;
         }
 
-        unsigned short int* const diff_results = (unsigned short int*)malloc(sizeof(unsigned short int) * related_sequence_count);
+        unsigned int* const diff_results = (unsigned int*)malloc(sizeof(unsigned int) * related_sequence_count);
 
         calc_diff_one_with_many(tile, (const Tile* const * const)related_tiles_for_tile, related_sequence_count, cache_info, arp, diff_results);
 
@@ -493,7 +493,7 @@ void clean_related_group(const Tile* const tile,
 
         free(diff_results);
     } else if(related_sequence_count == 1) {
-        const unsigned short t_compare_result = calc_diff(tile, (*related_sequence_for_tile)->tile, cache_info);
+        const unsigned int t_compare_result = calc_diff(tile, (*related_sequence_for_tile)->tile, cache_info);
 
         if(t_compare_result > arp.max_diff_pixels) {
             delete_tiles_sequence(*related_sequence_for_tile);
@@ -612,7 +612,7 @@ NodeResult calc_left_node_result(TileGroupsSequence* groups_sequence,
     } else {
         TileGroupsSequence* t_group_sequence = groups_sequence->first;
 
-        unsigned short int t_diff_result = USHORT_MAX;
+        unsigned int t_diff_result = TILE_PIXELS_COUNT;
 
         ResultSlot empty_slot;
         empty_slot.bt_seq = NULL;

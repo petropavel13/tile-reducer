@@ -1,8 +1,6 @@
 #ifndef CUDA_FUNCTIONS_H
 #define CUDA_FUNCTIONS_H
 
-#define USHORT_MAX 65535
-
 __host__ __device__ inline unsigned int index_in_3d(const unsigned int x,
                                         const unsigned int x_size,
                                         const unsigned int y,
@@ -35,7 +33,7 @@ __global__ void sum_y_dimension(unsigned char* matrices,
 
 __global__ void sum_x_dimension(unsigned short int* vectors,
                                 size_t vector_size_pitch,
-                                unsigned short int* results);
+                                unsigned int* results);
 
 
 
@@ -55,6 +53,6 @@ __global__ void sum_y_dimension_one_matrix(unsigned char* matrix,
 
 
 __global__ void sum_x_dimension_one_vector(unsigned short int* vector,
-                                unsigned short int* result);
+                                unsigned int* result);
 
 #endif // CUDA_FUNCTIONS_H

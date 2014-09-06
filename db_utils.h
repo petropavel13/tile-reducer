@@ -29,7 +29,7 @@ typedef struct DbInfo {
 } DbInfo;
 
 
-DbInfo* create_db_info(PGconn* conn, size_t pg_sql_buffer_size);
+DbInfo* create_db_info(PGconn* const conn, size_t sql_string_buffer_size);
 
 void create_tables_if_not_exists(const DbInfo* const db_info);
 
@@ -42,7 +42,7 @@ void write_tiles_paths(const DbInfo* const db_info,
                                     unsigned int* const ids_in_pg,
                                     void (*callback)(unsigned int));
 
-void read_tiles_ids(const DbInfo* const db_info, unsigned int* const ids_in_pg);
+void read_tiles_ids(const DbInfo* const db_info, unsigned int** const ids_in_pg, unsigned int* const count);
 
 TilesState check_tiles_in_db(const DbInfo *const db_info, unsigned int guess_count);
 
@@ -53,8 +53,8 @@ unsigned int load_next_zero_equal_id_leader(const DbInfo* const db_info);
 
 void load_zero_equals_ids_for_tile(const DbInfo* const db_info,
                                    const unsigned int tile_id,
-                                   unsigned int ** const ids_in_pg,
-                                   unsigned int * const count);
+                                   unsigned int** const ids_in_pg,
+                                   unsigned int* const count);
 
 void delete_zero_equal_pair_using_buffer(const DbInfo* const db_info,
                                          const unsigned int leader_tile_id,

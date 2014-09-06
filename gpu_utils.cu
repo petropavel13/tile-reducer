@@ -3,7 +3,8 @@
 
 #include <cuda_runtime.h>
 
-#include "math.h"
+#include <math.h>
+#include <stdio.h>
 
 #include "tile_utils.h"
 
@@ -21,7 +22,7 @@ typedef struct DevicePointers {
     unsigned short int* diff_convolution_y;
     size_t diff_convolution_y_pitch;
 
-    unsigned short int* diff_convolution_x;
+    unsigned int* diff_convolution_x;
 } DevicePointers;
 
 
@@ -45,10 +46,10 @@ typedef struct RunParams {
 
 #define DIFF_CONVOLUTION_Z_SIZE (sizeof(unsigned char) * TILE_WIDTH * TILE_HEIGHT)
 #define DIFF_CONVOLUTION_Y_SIZE (sizeof(unsigned short int) * TILE_WIDTH)
-#define DIFF_CONVOLUTION_X_SIZE (sizeof(unsigned short int))
+#define DIFF_CONVOLUTION_X_SIZE (sizeof(unsigned int))
 
-#define SHARED_MEM_SIZE_WIDTH (sizeof(unsigned short int) * TILE_WIDTH)
 #define SHARED_MEM_SIZE_HEIGHT (sizeof(unsigned short int) * TILE_HEIGHT)
+#define SHARED_MEM_SIZE_WIDTH (sizeof(unsigned int) * TILE_WIDTH)
 
 
 #define CHECK_ERROR_VERBOSE_LEAVE( cuda_error, action_str, leave_label, error_var ) \
@@ -85,7 +86,7 @@ cudaError_t run_compare(RunParams rp,
                        DevicePointers dp,
                        cudaStream_t stream,
                        const unsigned int right_images_count,
-                       unsigned short int* const diff_results) {
+                       unsigned int* const diff_results) {
     sub_one_cube_with_others<<<rp.grid_dim_diff, rp.block_dim_diff, 0, stream>>>(dp.left_raw_image, dp.right_raw_images, dp.right_raw_images_pitch, dp.diff_results, dp.diff_results_pitch);
 
     sum_z_dimension_zero_or_one<<<rp.grid_dim_convolution_z, rp.block_dim_convolution_z, 0, stream>>>(dp.diff_results, dp.diff_results_pitch, dp.diff_convolution_z, dp.diff_convolution_z_pitch);
@@ -122,7 +123,7 @@ cudaError_t alloc_device_mem(DevicePointers* const dps,
 TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_left_image,
                                                  const unsigned char* const raw_right_images,
                                                  const unsigned int right_images_count,
-                                                 unsigned short int* const diff_results) {
+                                                 unsigned int* const diff_results) {
 
     cudaError_t error = cudaSuccess;
 
@@ -298,7 +299,7 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
 TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_image,
                                            const unsigned char* const raw_right_images,
                                            const unsigned int right_images_count,
-                                           unsigned short int* const diff_results) {
+                                           unsigned int* const diff_results) {
     DevicePointers dp;
 
     const RunParams rp = make_run_params(right_images_count);

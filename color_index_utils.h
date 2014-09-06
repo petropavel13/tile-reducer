@@ -37,18 +37,6 @@ typedef struct TCTParams {
 } TCTParams;
 
 
-static inline TCTParams make_tct_params(GenericNode * const tiles_tree,
-                          void(*index_callback)(unsigned char),
-                          void(*flush_callback)(unsigned char),
-                          DbInfo* const db_info) {
-    return (TCTParams) {
-            .tiles_tree = tiles_tree,
-            .index_callback = index_callback,
-            .flush_callback = flush_callback,
-            .db_info  = db_info,
-    };
-}
-
 TilesColorsTree* create_tiles_colors_tree(const GenericNode* const tiles_tree,
                                           DbInfo * const db_info,
                                           void(*index_callback)(unsigned char),
@@ -60,18 +48,9 @@ void index_tree(TilesColorsTree* const tiles_colors_tree, const GenericNode* con
 void index_tile(TilesColorsTree *const tiles_tree, const Tile* const tile);
 
 
-TileColor* create_or_get_tile_color(const unsigned int tile_id,
-                                    const unsigned int color,
-                                    TilesColorsTree * const tiles_tree);
-TileColor* create_tile_color(const unsigned int tile_id, const unsigned int color);
-
 void destroy_tile_color_tree(TilesColorsTree* tiles_tree);
 
 void flush_tiles_colors_tree(TilesColorsTree *const tiles_colors_tree);
-
-void flush_tiles_colors_node(const GenericNode* const tile_color_node, TilesColorsTree * const tiles_colors_tree);
-
-void tile_color_destructor(void* data);
 
 static inline unsigned int calc_color(unsigned char* rgba_color) {
     return (((unsigned int) rgba_color[0]) << 24) +

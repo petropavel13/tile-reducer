@@ -10,7 +10,8 @@ SOURCES += main.c \
     db_utils.c \
     cluster_utils.c \
     generic_avl_tree.c \
-    color_index_utils.c
+    color_index_utils.c \
+    fs_utils.c
 
 OTHER_FILES += \
     cuda_functions.cu \
@@ -26,7 +27,8 @@ HEADERS += \
     cluster_utils.h \
     generic_avl_tree.h \
     color_index_utils.h \
-    apprunparams.h
+    apprunparams.h \
+    fs_utils.h
 
 INCLUDEPATH += "/usr/include/postgresql" \
                "/usr/include/postgresql-9.3/"

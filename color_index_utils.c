@@ -26,7 +26,7 @@ TilesColorsTree* create_tiles_colors_tree(const GenericNode* const tiles_tree,
 }
 
 void* index_tree_and_flush_result(void *arg) {
-    TCTParams* const params = (TCTParams*)arg;
+    TCTParams* const params = arg;
 
     TilesColorsTree* const tc_tree = create_tiles_colors_tree(params->tiles_tree,
                                                                  params->db_info,
@@ -67,23 +67,13 @@ void index_tree(TilesColorsTree* const tiles_colors_tree, const GenericNode* con
     }
 }
 
-void index_tile(TilesColorsTree *const tiles_tree, const Tile* const tile) {
-    unsigned char* raw_image = NULL;
+TileColor* create_tile_color(const unsigned int tile_id, const unsigned int color) {
+    TileColor* const tile_color = malloc(sizeof(TileColor));
+    tile_color->color = color;
+    tile_color->tile_id = tile_id;
+    tile_color->repeat_count = 0;
 
-    get_tile_pixels(tile->tile_file, &raw_image);
-
-    unsigned int temp_color = 0;
-    TileColor* temp_tile_color = NULL;
-
-    for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
-        temp_color = calc_color(&raw_image[i]);
-
-        temp_tile_color = create_or_get_tile_color(tile->tile_id, temp_color, tiles_tree);
-
-        temp_tile_color->repeat_count++;
-    }
-
-    free(raw_image);
+    return tile_color;
 }
 
 TileColor* create_or_get_tile_color(const unsigned int tile_id,
@@ -108,26 +98,34 @@ TileColor* create_or_get_tile_color(const unsigned int tile_id,
     return node->data;
 }
 
-TileColor* create_tile_color(const unsigned int tile_id, const unsigned int color) {
-    TileColor* const tile_color = malloc(sizeof(TileColor));
-    tile_color->color = color;
-    tile_color->tile_id = tile_id;
-    tile_color->repeat_count = 0;
+void index_tile(TilesColorsTree *const tiles_tree, const Tile* const tile) {
+    unsigned char* raw_image = NULL;
 
-    return tile_color;
+    get_tile_pixels(tile->tile_file, &raw_image);
+
+    unsigned int temp_color = 0;
+    TileColor* temp_tile_color = NULL;
+
+    for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
+        temp_color = calc_color(&raw_image[i]);
+
+        temp_tile_color = create_or_get_tile_color(tile->tile_id, temp_color, tiles_tree);
+
+        temp_tile_color->repeat_count++;
+    }
+
+    free(raw_image);
+}
+
+
+
+void tile_color_destructor(void* data) {
+    free(data);
 }
 
 void destroy_tile_color_tree(TilesColorsTree* tiles_tree) {
     destroy_tree(tiles_tree->root_node, &tile_color_destructor);
     free(tiles_tree);
-}
-
-void flush_tiles_colors_tree(TilesColorsTree* const tiles_colors_tree) {
-    tiles_colors_tree->root_node = remove_node(tiles_colors_tree->root_node, 0, &tile_color_destructor);
-
-    flush_tiles_colors_node(tiles_colors_tree->root_node, tiles_colors_tree);
-
-    flush_db_buffer(tiles_colors_tree->db_info);
 }
 
 void flush_tiles_colors_node(const GenericNode* const tile_color_node, TilesColorsTree* const tiles_colors_tree) {
@@ -148,6 +146,10 @@ void flush_tiles_colors_node(const GenericNode* const tile_color_node, TilesColo
     }
 }
 
-void tile_color_destructor(void* data) {
-    free(data);
+void flush_tiles_colors_tree(TilesColorsTree* const tiles_colors_tree) {
+    tiles_colors_tree->root_node = remove_node(tiles_colors_tree->root_node, 0, &tile_color_destructor);
+
+    flush_tiles_colors_node(tiles_colors_tree->root_node, tiles_colors_tree);
+
+    flush_db_buffer(tiles_colors_tree->db_info);
 }

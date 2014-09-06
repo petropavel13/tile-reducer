@@ -1,19 +1,25 @@
 #include "tile_utils.h"
-#include "math.h"
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
 
 #include <pthread.h>
+#include <dirent.h>
+#include "lodepng.h"
+#include "gpu_utils.h"
 
 #define MIN_TILES_PER_THREAD 256
 #define MIN_TILES_FOR_MULTITHREADING (MIN_TILES_PER_THREAD * 2)
 
 typedef struct CompareBackend {
-    unsigned short (*one_with_one_func)(const unsigned char* const,
+    unsigned int (*one_with_one_func)(const unsigned char* const,
                                         const unsigned char* const);
 
     TaskStatus (*one_with_many_func)(const unsigned char* const,
                                const unsigned char* const,
                                const unsigned int,
-                               unsigned short* const);
+                               unsigned int* const);
 
     void* (*memory_allocator)(size_t);
     void (*memory_deallocator)(void*);
@@ -28,16 +34,39 @@ typedef struct LoadTilesParams {
     unsigned char** raw_cache_output;
 } LoadTilesParams;
 
-LoadTilesParams make_load_params(const Tile * const * const tiles,
-                                 const unsigned int count,
-                                 unsigned char** const raw_output,
-                                 unsigned char** const raw_cache_output) {
-    return (LoadTilesParams) {
-        .tiles = (Tile**)tiles,
-        .count = count,
-        .raw_output = raw_output,
-        .raw_cache_output = raw_cache_output,
-    };
+
+
+unsigned int compare_images_one_with_one_cpu(const unsigned char * const raw_left_image,
+                                               const unsigned char * const raw_right_image) {
+    unsigned int res = 0;
+
+    for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
+        res += (raw_left_image[i+0] != raw_right_image[i+0] || // r
+                raw_left_image[i+1] != raw_right_image[i+1] || // g
+                raw_left_image[i+2] != raw_right_image[i+2] || // b
+                raw_left_image[i+3] != raw_right_image[i+3]);  // a
+    }
+
+    return res;
+}
+
+TaskStatus compare_images_one_with_many_cpu(const unsigned char* const left_raw_image,
+                                            const unsigned char* const right_raw_images,
+                                            const unsigned int right_images_count,
+                                            unsigned int* const diff_results) {
+    for (unsigned int i = 0; i < right_images_count; ++i) {
+        diff_results[i] = compare_images_one_with_one_cpu(left_raw_image, &right_raw_images[i * TILE_SIZE_BYTES]);
+    }
+
+    return TASK_DONE;
+}
+
+void* cpu_backend_memory_allocator(size_t bytes) {
+    return malloc(bytes);
+}
+
+void cpu_backend_memory_deallocator(void* ptr) {
+    free(ptr);
 }
 
 CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
@@ -76,74 +105,6 @@ unsigned int get_tile_pixels(const TileFile* const tile, unsigned char** const p
     unsigned int width, height;
 
     return lodepng_decode32(pixels, &width, &height, tile->data, tile->size_bytes);
-}
-
-
-unsigned int get_total_files_count(const char* const path) {
-    DIR* dir = NULL;
-    struct dirent *entry;
-
-    unsigned int count = 0;
-
-    if((dir = opendir(path)) != NULL) {
-        while ((entry = readdir(dir)) != 0) {
-            if(entry->d_type & DT_DIR) { // directory
-                if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-                    continue;
-
-                char inner_path[strlen(path) + strlen(entry->d_name + 1)];
-                sprintf(inner_path, "%s%s/", path, entry->d_name);
-
-                count += get_total_files_count(inner_path);
-            } else {
-                count++;
-            }
-        }
-
-        closedir(dir);
-    }
-
-    return count;
-}
-
-void read_tiles_paths(const char* path,
-                      char** const paths,
-                      const unsigned int *const total,
-                      unsigned int *const current,
-                      unsigned char *const last_percent,
-                      void (*callback)(unsigned char)) {
-    DIR* dir = NULL;
-    struct dirent *entry;
-
-    if((dir = opendir(path)) != NULL) {
-        while ((entry = readdir(dir)) != 0) {
-            if(entry->d_type & DT_DIR) {
-                if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-                    continue;
-
-                char inner_path[strlen(path) + strlen(entry->d_name) + 1 + 1];
-                sprintf(inner_path, "%s%s/", path, entry->d_name);
-
-                read_tiles_paths(inner_path, paths, total, current, last_percent, callback);
-            } else {
-                char* const inner_path = malloc(sizeof(char) * (strlen(path) + strlen(entry->d_name) + 1));
-                sprintf(inner_path, "%s%s", path, entry->d_name);
-
-                paths[(*current)++] = inner_path;
-
-                if(callback != NULL) {
-                    const unsigned char current_percent = (*current / (*total / 100));
-
-                    if(*last_percent != current_percent) {
-                        callback(current_percent);
-                        *last_percent = current_percent;
-                    }
-                }
-            }
-        }
-        
-        closedir(dir);
-    }
 }
 
 void tile_file_destructor(TileFile* tile_file) {
@@ -210,12 +171,22 @@ void load_tiles_pixels_threads(const Tile* const * const tiles,
         unsigned char* cache_out[count_for_decode];
 
         for (unsigned char i = 0; i < num_threads - 1; ++i) {
-            ltps[i] = make_load_params((const Tile* const* const)tiles_for_thread_decode + t_offset, tiles_per_thread, raw_tiles_links + t_offset, &cache_out[t_offset]);
+            ltps[i] = (LoadTilesParams) {
+                    .tiles = (Tile**)tiles_for_thread_decode + t_offset,
+                    .count = tiles_per_thread,
+                    .raw_output = raw_tiles_links + t_offset,
+                    .raw_cache_output = &cache_out[t_offset],
+                };
             t_offset += tiles_per_thread;
         }
 
         // last thread has more work
-        ltps[num_threads - 1] = make_load_params((const Tile* const* const)tiles_for_thread_decode + t_offset, count_for_decode - t_offset, raw_tiles_links + t_offset, &cache_out[t_offset]);
+        ltps[num_threads - 1] = (LoadTilesParams) {
+                .tiles = (Tile**)tiles_for_thread_decode + t_offset,
+                .count = count_for_decode - t_offset,
+                .raw_output = raw_tiles_links + t_offset,
+                .raw_cache_output = &cache_out[t_offset],
+            };
 
         for (unsigned char i = 0; i < num_threads; ++i) {
             pthread_create(&threads[i], NULL, &load_tiles_pixels_part, &ltps[i]);
@@ -263,39 +234,6 @@ void* load_tiles_pixels_part(void* params) {
     return NULL;
 }
 
-unsigned short compare_images_one_with_one_cpu(const unsigned char * const raw_left_image,
-                                               const unsigned char * const raw_right_image) {
-    unsigned int res = 0;
-
-    for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
-        res += (raw_left_image[i+0] != raw_right_image[i+0] ||
-                raw_left_image[i+1] != raw_right_image[i+1] ||
-                raw_left_image[i+2] != raw_right_image[i+2] ||
-                raw_left_image[i+3] != raw_right_image[i+3]);
-    }
-
-    return (unsigned short) (res > USHORT_MAX ? USHORT_MAX : res);
-}
-
-TaskStatus compare_images_one_with_many_cpu(const unsigned char * const left_raw_image,
-                                            const unsigned char * const right_raw_images,
-                                            const unsigned int right_images_count,
-                                            unsigned short * const diff_results) {
-    for (unsigned int i = 0; i < right_images_count; ++i) {
-        diff_results[i] = compare_images_one_with_one_cpu(left_raw_image, &right_raw_images[i * TILE_SIZE_BYTES]);
-    }
-
-    return TASK_DONE;
-}
-
-void* cpu_backend_memory_allocator(size_t bytes) {
-    return malloc(bytes);
-}
-
-void cpu_backend_memory_deallocator(void* ptr) {
-    free(ptr);
-}
-
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
                  unsigned char ** const pixels) {
@@ -315,10 +253,10 @@ void load_pixels(const Tile* const tile,
     memcpy(*pixels, t_pixels, TILE_SIZE_BYTES);
 }
 
-unsigned short int calc_diff(const Tile* const left_node,
+unsigned int calc_diff(const Tile* const left_node,
                              const Tile* const right_node,
                              CacheInfo* const cache_info) {
-    unsigned short int diff_result;
+    unsigned int diff_result;
     const unsigned long key = make_key(left_node->tile_id, right_node->tile_id);
 
     if(get_diff_from_cache(key, cache_info, &diff_result) == CACHE_HIT) {
@@ -347,7 +285,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
                              const unsigned int right_tiles_count,
                              CacheInfo* const cache_info,
                              const AppRunParams arp,
-                             unsigned short int * const results) {
+                             unsigned int* const results) {
     const Tile* right_tiles_for_load[right_tiles_count];
     unsigned long keys_for_load[right_tiles_count];
     unsigned int index_mapping[right_tiles_count];
@@ -379,11 +317,11 @@ void calc_diff_one_with_many(const Tile* const left_tile,
     unsigned char* left_tile_pixels = NULL;
     load_pixels(left_tile, cache_info, &left_tile_pixels);
 
-    CompareBackend t_cb = make_backend(count_for_load > 32 ? CUDA_GPU : CPU, tiles_per_mem_loop);
+    CompareBackend t_cb = make_backend(count_for_load >= arp.min_tiles_count_for_gpu_compare ? CUDA_GPU : CPU, tiles_per_mem_loop);
 
     unsigned char* t_raw_right_tiles = t_cb.memory_allocator(TILE_SIZE_BYTES * tiles_per_mem_loop);
 
-    unsigned short int* const t_results = malloc(sizeof(unsigned short int) * tiles_per_mem_loop);
+    unsigned int* const t_results = malloc(sizeof(unsigned int) * tiles_per_mem_loop);
 
     for (unsigned int i = 0; i < loops_count; ++i) {
         load_tiles_pixels_threads((const Tile* const * const)right_tiles_for_load + t_offset, tiles_per_mem_loop, cache_info, arp, t_raw_right_tiles);
@@ -421,7 +359,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
 
             free(right_tile_pixels);
         } else {
-            t_cb = make_backend(tail_count > 32 ? CUDA_GPU : CPU, tail_count);
+            t_cb = make_backend(tail_count >= arp.min_tiles_count_for_gpu_compare ? CUDA_GPU : CPU, tail_count);
 
             t_raw_right_tiles = t_cb.memory_allocator(TILE_SIZE_BYTES * tail_count);
 

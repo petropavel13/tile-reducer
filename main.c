@@ -1,52 +1,67 @@
 #include <stdio.h>
 
+#include <math.h>
+
 #include "tile_utils.h"
 #include "cache_utils.h"
 #include "db_utils.h"
 #include "cluster_utils.h"
 #include "color_index_utils.h"
 #include "apprunparams.h"
+#include "fs_utils.h"
 
 #include <libpq-fe.h>
 #include <pthread.h>
 
-#define DEFAULT_MB_IMAGE_CACHE_SIZE 512
-#define DEFAULT_MB_DIFF_CACHE_SIZE 128
-#define DEFAULT_MB_PG_SQL_BUFFER_SIZE 8
-#define DEFAULT_NUM_THREADS 4
+#define IS_STRINGS_EQUAL(str0, st1) (strcmp(str0, st1) == 0)
+#define IS_STRINGS_NOT_EQUAL(str0, st1) (strcmp(str0, st1) != 0)
 
-#define STRINGS_EQUAL 0
+#define PARAM_NOT_FOUND "false"
+#define PARAM_FOUND "true"
 
-//#define CONNECTION_STRING "dbname=tiles_db hostaddr=192.168.0.108 user=postgres port=5432 password=123"
+#define IS_PARAM_FOUND(param) (IS_STRINGS_EQUAL(param, PARAM_NOT_FOUND) == 0)
+#define IS_PARAM_NOT_FOUND(param) IS_STRINGS_EQUAL(param, PARAM_NOT_FOUND)
+
+#define CONNECTION_STRING "dbname=tiles_db hostaddr=192.168.0.108 user=postgres port=5432 password=123"
 //#define CONNECTION_STRING "dbname=tiles_test hostaddr=172.18.36.131 user=postgres port=5432 password=123"
-#define CONNECTION_STRING "dbname=tiles_db_256 host=/var/run/postgresql user=postgres password=123"
+//#define CONNECTION_STRING "dbname=tiles_db_256 host=/var/run/postgresql user=postgres password=123"
 
 
 #define LEFT 0
 #define RIGHT 1
 //#define DEBUG 1
 
-char* get_arg(const int argc, char** argv, const char* const key) {
-    int i = 0;
+typedef struct FilePathList {
+    char* file_path;
+    struct FilePathList* next;
+} FilePathList;
 
-    for(; i < argc; ++i) {
-        if (strstr(argv[i], key) != NULL) {
-            if (strchr(argv[i], '=') != NULL) {
-                return &(argv[i][strlen(key) + 1]);
-            } else {
-                return "true";
-            }
-        }
-    }
+typedef FilePathList* FilePathListRef;
 
-    return "false";
+typedef struct FSWalkerContext {
+    unsigned int count;
+    FilePathList* files_list;
+} FSWalkerContext;
+
+void file_path_list_destructor(FilePathList* const head) {
+    if (head == NULL) return;
+
+    if (head->file_path != NULL) free(head->file_path);
+
+    file_path_list_destructor(head->next);
+    free(head);
 }
 
-void print_progress_paths_read(const unsigned char percent_done) {
-    printf("\r                            ");
-    printf("\rReading tiles paths...%d%%", percent_done);
-    fflush(stdout);
+void read_files_callback(const char* file_path, void* const context) {
+    FSWalkerContext* const ctx = context;
+
+    ctx->count++;
+    ctx->files_list->file_path = strcpy(malloc(sizeof(char) * strlen(file_path) + 1), file_path);
+    FilePathList* next = ctx->files_list->next = malloc(sizeof(FilePathList));
+    next->next = NULL;
+    ctx->files_list = next;
 }
+
 
 void print_progress_tiles_db_write(const unsigned int current) {
     printf("\r                            ");
@@ -113,8 +128,10 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
     for (unsigned char i = 0; i < num_threads; ++i) {
         heads[i] = get_head(tiles_tree, num_threads >> 2, i);
         connections[i] = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 2);
-//        th_params[i] = make_tct_params(heads[i], NULL, NULL, connections[i]);
-        th_params[i] = make_tct_params(heads[i], &print_progress_index_colors, &print_progress_tiles_colors_db_write, connections[i]);
+        th_params[i].tiles_tree = heads[i];
+        th_params[i].index_callback = &print_progress_index_colors;
+        th_params[i].flush_callback = &print_progress_tiles_colors_db_write;
+        th_params[i].db_info = connections[i];
         pthread_create(&threads[i], NULL, &index_tree_and_flush_result, &th_params[i]);
     }
 
@@ -122,7 +139,11 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
     GenericNode* const tails = get_tails(create_node(tiles_tree->key, tiles_tree->data), tiles_tree, num_threads >> 2);
 
     DbInfo* const db_info = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 2);
-    TCTParams params = make_tct_params(tails, NULL, NULL, db_info);
+    TCTParams params;
+    params.tiles_tree = tails;
+    params.index_callback = NULL;
+    params.flush_callback = NULL;
+    params.db_info = db_info;
 
     index_tree_and_flush_result(&params);
 
@@ -135,6 +156,22 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
     }
 }
 
+char* get_arg(const int argc, char** argv, const char* const key) {
+    int i = 0;
+
+    for(; i < argc; ++i) {
+        if (strstr(argv[i], key) != NULL) {
+            if (strchr(argv[i], '=') != NULL) {
+                return &(argv[i][strlen(key) + 1]);
+            } else {
+                return PARAM_FOUND;
+            }
+        }
+    }
+
+    return PARAM_NOT_FOUND;
+}
+
 void print_help() {
     printf("template: ./comparer --path=/path/to/tiles/folder/ --max_diff_pixels=0...65535 [--max_mb_cache=] [--max_num_theads=2^x -> (2,4,8,16,...)]\n");
     printf("example: ./comparer --path=/tiles/opt_easy/ --max_diff_pixels=16 --max_mb_cache=4096 --max_threads=8\n");
@@ -144,45 +181,62 @@ void print_help() {
 
 int main(int argc, char* argv [])
 {
+    AppRunParams arp = make_default_app_run_params();
+
     const char* const path = get_arg(argc, argv, "--path");
     const char* const max_diff_pixels_param = get_arg(argc, argv, "--max_diff_pixels");
 
-    if (strcmp(path, "false") == STRINGS_EQUAL || strcmp(max_diff_pixels_param, "false") == STRINGS_EQUAL) {
+    if (IS_PARAM_NOT_FOUND(path) || IS_PARAM_NOT_FOUND(max_diff_pixels_param)) {
         print_help();
         return 1;
+    } else {
+        arp.max_diff_pixels = atoi(max_diff_pixels_param);
     }
 
-    const unsigned short int max_diff_pixels = atoi(max_diff_pixels_param);
     const char* const max_cache_size_param = get_arg(argc, argv, "--max_mb_cache");
 
-    const size_t max_cache_size_bytes = strcmp(max_cache_size_param, "false") != STRINGS_EQUAL ?
-                ((size_t) atoi(max_cache_size_param)) * 1024 * 1024 :
-                ((size_t) DEFAULT_MB_IMAGE_CACHE_SIZE) * 1024 * 1024;
-
-
-    const char* const max_threads_param = get_arg(argc, argv, "--max_threads");
-
-    const unsigned char max_num_threads = strcmp(max_threads_param, "false") != STRINGS_EQUAL ? atoi(max_threads_param) : DEFAULT_NUM_THREADS;
-
-    if ((max_num_threads & (~max_num_threads + 1)) != max_num_threads) {
-        printf("max_threads must be power of 2!\n\n");
-        print_help();
-        return 1;
+    if (IS_PARAM_FOUND(max_cache_size_param)) {
+        arp.max_cache_size = ((size_t) atoi(max_cache_size_param)) * 1024 * 1024;
     }
 
-    const AppRunParams arp = make_app_run_params(max_diff_pixels, max_num_threads);
+    const char* const max_num_threads_param = get_arg(argc, argv, "--max_threads");
+
+    if (IS_PARAM_FOUND(max_num_threads_param)) {
+        const unsigned char max_num_threads = atoi(max_num_threads_param);
+
+        arp.max_num_threads = max_num_threads;
+
+        if ((max_num_threads & (~max_num_threads + 1)) != max_num_threads) {
+            printf("max_threads must be power of 2!\n\n");
+            print_help();
+            return 1;
+        }
+    }
 
     printf("Tiles folder: \"%s\"\nMax diff. pixels: %u\nCache size: %u MB\nMax threads: %u\n\n",
                           path,
-                          max_diff_pixels,
-                          (unsigned int) (max_cache_size_bytes / 1024 / 1024),
-                          (unsigned int) max_num_threads
+                          arp.max_diff_pixels,
+                          (unsigned int) (arp.max_cache_size / 1024 / 1024),
+                          (unsigned int) arp.max_num_threads
         );
 
-    printf("Computing tiles count...");
-    fflush(stdout);
+    FilePathList* fp_head = malloc(sizeof(FilePathList));
 
-    const unsigned int total = get_total_files_count(path);
+    FSWalkerContext fs_walker_ctx;
+    fs_walker_ctx.count = 0;
+    fs_walker_ctx.files_list = fp_head;
+
+    read_files_in_folder_recursive(path, &fs_walker_ctx, &read_files_callback);
+
+    const unsigned int total = fs_walker_ctx.count;
+
+    char** const tiles_paths = malloc(sizeof(char*) * total);
+
+    FilePathList* t_fp = fp_head;
+
+    for (unsigned int i = 0; t_fp->next != NULL; ++i, t_fp = t_fp->next) {
+        tiles_paths[i] = t_fp->file_path;
+    }
 
     printf("\rTotal tiles count: %d         \n", total);
     fflush(stdout);
@@ -198,17 +252,12 @@ int main(int argc, char* argv [])
         return 1;
     }
 
-    DbInfo* const db_info = create_db_info(conn, 1024 * 1024 * DEFAULT_MB_PG_SQL_BUFFER_SIZE);
+    DbInfo* const db_info = create_db_info(conn, arp.max_sql_string_size);
 
     printf("done\n");
-    fflush(stdout);
+    fflush(stdout);    
 
-    unsigned int zero = 0;
-    unsigned char percent = 0;
-
-    char** const tiles_paths = malloc(sizeof(char*) * total);
-
-    read_tiles_paths(path, tiles_paths, &total, &zero, &percent, &print_progress_paths_read);
+//    read_tiles_paths(path, tiles_paths, &total, &zero, &percent, &print_progress_paths_read);
 
     printf("\r                                                ");
     printf("\rReading tiles paths...done\n");
@@ -216,20 +265,24 @@ int main(int argc, char* argv [])
 
     create_tables_if_not_exists(db_info);
 
-//    clear_all_data(db_info); // DEBUG
+    clear_all_data(db_info); // DEBUG
 
     const unsigned int res = check_tiles_in_db(db_info, total);
 
-    unsigned int* pg_ids = malloc(sizeof(unsigned int) * total);
+    unsigned int* pg_ids = NULL;
+
+    unsigned int not_used = 0;
 
     if(res == TILES_ALREADY_EXISTS) {
         printf("Tiles already in db. Reading ids...\n");
 
         clear_session_data(db_info);
 
-        read_tiles_ids(db_info, pg_ids);
+        read_tiles_ids(db_info, &pg_ids, &not_used);
     } else if(res == NO_TILES_IN_DB) {
         clear_all_data(db_info); // reset sequences
+
+        pg_ids = malloc(sizeof(unsigned int) * total);
         write_tiles_paths(db_info, (const char * const * const)tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
@@ -240,6 +293,8 @@ int main(int argc, char* argv [])
         fflush(stdout);
 
         clear_all_data(db_info);
+
+        pg_ids = malloc(sizeof(unsigned int) * total);
         write_tiles_paths(db_info, (const char * const * const)tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
 
         printf("\r                                                ");
@@ -247,7 +302,9 @@ int main(int argc, char* argv [])
         fflush(stdout);
     }
 
-    CacheInfo* const cache_info = init_cache(max_cache_size_bytes, DEFAULT_MB_DIFF_CACHE_SIZE * 1024 * 1024, TILE_SIZE_BYTES);
+    const size_t diffs_cache_size = floor(arp.max_cache_size * 0.05);
+
+    CacheInfo* const cache_info = init_cache(diffs_cache_size, arp.max_cache_size - diffs_cache_size, TILE_SIZE_BYTES);
 
     Tile* temp_tile = malloc(sizeof(Tile));
     temp_tile->tile_id = pg_ids[0];
@@ -280,23 +337,25 @@ int main(int argc, char* argv [])
     printf("\rLoading tiles into RAM...done\n");
     fflush(stdout);
 
-    for (unsigned int i = 0; i < total; ++i)
-    {
-        free(tiles_paths[i]);
-    }
+    file_path_list_destructor(fp_head);
 
     free(tiles_paths);
 
     if(res != TILES_ALREADY_EXISTS) {
         drop_index_tile_color(db_info);
 
-        if (max_num_threads < 2) {
-            TCTParams params = make_tct_params(all_tiles, &print_progress_index_colors, &print_progress_tiles_colors_db_write, db_info);
+        if (arp.max_num_threads < 2) {
+            TCTParams params;
+            params.tiles_tree = all_tiles;
+            params.index_callback = &print_progress_index_colors;
+            params.flush_callback = &print_progress_tiles_colors_db_write;
+            params.db_info = db_info;
+
             index_tree_and_flush_result(&params);
         } else {
 //            printf("Indexing and writing tiles color %u threads...", max_num_threads);
             fflush(stdout);
-            run_index_threads(all_tiles, max_num_threads);
+            run_index_threads(all_tiles, arp.max_num_threads);
 //            printf("\rIndexing and writing tiles color %u threads...done\n", max_num_threads);
             fflush(stdout);
         }
@@ -320,7 +379,7 @@ int main(int argc, char* argv [])
         fflush(stdout);
     }
 
-    if (max_diff_pixels > 0) {
+    if (arp.max_diff_pixels > 0) {
         clusterize_simple(all_tiles, total, arp, db_info, cache_info);
     }
 

@@ -8,12 +8,12 @@
 
 #define UINT32_MAX_CHARS_IN_STRING (MAX_UINT32_STR_LEN + STRING_TEMPLATE_SIZE)
 
-DbInfo* create_db_info(PGconn* conn, size_t pg_sql_buffer_size) {
+DbInfo* create_db_info(PGconn* const conn, size_t sql_string_buffer_size) {
     DbInfo* db_info = malloc(sizeof(DbInfo));
     db_info->conn = conn;
     db_info->db_buffer = malloc(sizeof(DbBuffer));
     db_info->db_buffer->current_offset = 0;
-    db_info->db_buffer->max_buffer_size = pg_sql_buffer_size;
+    db_info->db_buffer->max_buffer_size = sql_string_buffer_size;
     db_info->db_buffer->buffer_str = malloc(sizeof(char) * db_info->db_buffer->max_buffer_size);
 
     return db_info;
@@ -274,15 +274,16 @@ void write_tiles_paths(const DbInfo* const db_info,
     }
 }
 
-void read_tiles_ids(const DbInfo *const db_info, unsigned int* const ids_in_pg) {
+void read_tiles_ids(const DbInfo *const db_info, unsigned int** const ids_in_pg, unsigned int* const count) {
     const char select_ids_sql[] = "SELECT id FROM tiles;";
 
-    PGresult *res = PQexec(db_info->conn, select_ids_sql);
+    PGresult* const res = PQexec(db_info->conn, select_ids_sql);
 
-    const unsigned int count_objects = PQntuples(res);
+    const unsigned int cnt = (*count) = PQntuples(res);
+    unsigned int* ids = (*ids_in_pg) = malloc(sizeof(unsigned int) * cnt);
 
-    for (unsigned int i = 0; i < count_objects; ++i) {
-        ids_in_pg[i] = atoi(PQgetvalue(res, i, 0));
+    for (unsigned int i = 0; i < cnt; ++i) {
+        ids[i] = atoi(PQgetvalue(res, i, 0));
     }
 
     PQclear(res);

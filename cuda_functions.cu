@@ -62,7 +62,7 @@ __global__ void sum_z_dimension_zero_or_one(unsigned char* cubes,
         result += cube[temp_index + i];
     }
 
-    matrix[index_in_matrix] = 1 * (result > 0);
+    matrix[index_in_matrix] = result > 0; // 0 or 1
 }
 
 __global__ void sum_y_dimension(unsigned char* matrices,
@@ -86,9 +86,9 @@ __global__ void sum_y_dimension(unsigned char* matrices,
 
     const unsigned int row_index_in_matrix = column_count * row_number;
 
-    extern __shared__ unsigned short int temp_results[];
+    extern __shared__ unsigned short int temp_results_sum_y[];
 
-    temp_results[row_number] = matrix[row_index_in_matrix + column_number];
+    temp_results_sum_y[row_number] = matrix[row_index_in_matrix + column_number];
 
     __syncthreads();
 
@@ -96,19 +96,19 @@ __global__ void sum_y_dimension(unsigned char* matrices,
     {
         if(row_number < s)
         {
-            temp_results[row_number] += temp_results[row_number + s];
+            temp_results_sum_y[row_number] += temp_results_sum_y[row_number + s];
         }
 
         __syncthreads();
     }
 
     if(row_number == 0)
-        vector[column_number] = temp_results[0];
+        vector[column_number] = temp_results_sum_y[0];
 }
 
 __global__ void sum_x_dimension(unsigned short int* vectors,
                                 size_t vector_size_pitch,
-                                unsigned short int* results) {
+                                unsigned int* results) {
 
     const unsigned short int column_number = threadIdx.x; // 0..256
 
@@ -120,28 +120,24 @@ __global__ void sum_x_dimension(unsigned short int* vectors,
 
     unsigned short int* vector = (unsigned short int*) ((char*)vectors + vector_offset);
 
-    extern __shared__ unsigned short int temp_results[];
+    extern __shared__ unsigned int temp_results_sum_x[];
 
-    temp_results[column_number] = vector[column_number];
+    temp_results_sum_x[column_number] = vector[column_number];
 
     __syncthreads();
-
-    unsigned int overhead_check;
 
     for(unsigned short int s = column_count / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
     {
         if(column_number < s)
         {
-            // prevent ushort overflow
-            overhead_check = temp_results[column_number] + temp_results[column_number + s];
-            temp_results[column_number] = USHORT_MAX * (overhead_check >= USHORT_MAX) + overhead_check * (overhead_check < USHORT_MAX);
+            temp_results_sum_x[column_number] += temp_results_sum_x[column_number + s];
         }
 
         __syncthreads();
     }
 
     if(column_number == 0)
-        results[vector_number] = temp_results[0];
+        results[vector_number] = temp_results_sum_x[0];
 }
 
 
@@ -178,7 +174,7 @@ __global__ void sum_z_dimension_one_cude(unsigned char* cube,
         result += cube[temp_index + i];
     }
 
-    matrix_result[index_in_matrix] = 1 * (result > 0);
+    matrix_result[index_in_matrix] = result > 0; // 0 or 1
 }
 
 __global__ void sum_y_dimension_one_matrix(unsigned char* matrix,
@@ -188,9 +184,9 @@ __global__ void sum_y_dimension_one_matrix(unsigned char* matrix,
 
     const unsigned int row_index_in_matrix = 256 * row_number;
 
-    extern __shared__ unsigned short int temp_results[];
+    extern __shared__ unsigned short int temp_results_sum_y[];
 
-    temp_results[row_number] = matrix[row_index_in_matrix + column_number];
+    temp_results_sum_y[row_number] = matrix[row_index_in_matrix + column_number];
 
     __syncthreads();
 
@@ -198,41 +194,37 @@ __global__ void sum_y_dimension_one_matrix(unsigned char* matrix,
     {
         if(row_number < s)
         {
-            temp_results[row_number] += temp_results[row_number + s];
+            temp_results_sum_y[row_number] += temp_results_sum_y[row_number + s];
         }
 
         __syncthreads();
     }
 
     if(row_number == 0)
-        vector_result[column_number] = temp_results[0];
+        vector_result[column_number] = temp_results_sum_y[0];
 }
 
 __global__ void sum_x_dimension_one_vector(unsigned short int* vector,
                                 unsigned short int* result) {
     const unsigned short int column_number = threadIdx.x; // 0..256
 
-    extern __shared__ unsigned short int temp_results[];
+    extern __shared__ unsigned int temp_results_sum_x[];
 
-    temp_results[column_number] = vector[column_number];
+    temp_results_sum_x[column_number] = vector[column_number];
 
     __syncthreads();
-
-    unsigned int overhead_check;
 
     for(unsigned short int s = 256 / 2; s >= 1; s = s / 2) // 128, 64, 32, 16, 8, 4, 2, 1
     {
         if(column_number < s)
         {
-            // prevent ushort overflow
-            overhead_check = temp_results[column_number] + temp_results[column_number + s];
-            temp_results[column_number] = USHORT_MAX * (overhead_check >= USHORT_MAX) + overhead_check * (overhead_check < USHORT_MAX);
+            temp_results_sum_x[column_number] += temp_results_sum_x[column_number + s];
         }
 
         __syncthreads();
     }
 
     if(column_number == 0)
-        (*result) = temp_results[0];
+        (*result) = temp_results_sum_x[0];
 }
 
