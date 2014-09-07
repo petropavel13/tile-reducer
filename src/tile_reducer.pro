@@ -1,7 +1,8 @@
-TEMPLATE = app
+TEMPLATE = lib
 CONFIG += console
 CONFIG -= qt
 CONFIG -= app_bundle
+CONFIG += staticlib
 
 SOURCES += main.c \
     tile_utils.c \
@@ -30,8 +31,7 @@ HEADERS += \
     apprunparams.h \
     fs_utils.h
 
-INCLUDEPATH += "/usr/include/postgresql" \
-               "/usr/include/postgresql-9.3/"
+INCLUDEPATH += "/usr/include/postgresql"
 
 LIBS += -lpq -pthread
 
@@ -51,13 +51,9 @@ NVCC_OPTIONS = --use_fast_math
 
 QMAKE_LIBDIR += $$CUDA_DIR/lib64/
 
-#QMAKE_LIBDIR += $$CUDA_DIR/lib64/ \
-    #"/usr/lib64/nvidia-current/"
-
 CUDA_OBJECTS_DIR = ./
 
 CUDA_LIBS = -lcudart
-#CUDA_LIBS = -lcuda -lcudart
 
 CUDA_INCLUDEPATH = $$CUDA_DIR/include
 

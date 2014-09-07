@@ -92,10 +92,10 @@ CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
     return cb;
 }
 
-TileFile* read_tile(const char* file_path) {
+TileFile* read_tile(const char* absolute_file_path) {
     TileFile* const tile = malloc(sizeof(TileFile));
 
-    lodepng_load_file(&tile->data, &tile->size_bytes, file_path);
+    lodepng_load_file(&tile->data, &tile->size_bytes, absolute_file_path);
 
     return tile;
 }

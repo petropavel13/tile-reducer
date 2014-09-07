@@ -24,7 +24,7 @@ typedef struct Tile {
 } Tile;
 
 
-TileFile* read_tile(const char* file_path);
+TileFile* read_tile(const char* absolute_file_path);
 
 unsigned int get_tile_pixels(const TileFile * const tile, unsigned char** const pixels);
 
