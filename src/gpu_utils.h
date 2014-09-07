@@ -6,42 +6,34 @@ typedef enum TaskStatus {
     TASK_FAILED
 } TaskStatus;
 
-
 #ifdef __cplusplus
+
 // nvcc compiles as C++ code
+#define CUDA_EXPORT extern "C"
 
-extern "C" unsigned int get_max_tiles_count_per_stream();
-
-extern "C" TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_left_image,
-                                                 const unsigned char* const raw_right_images,
-                                                 const unsigned int right_images_count,
-                                                 unsigned int* const diff_results);
-
-extern "C" TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_image,
-                                                      const unsigned char* const raw_right_images,
-                                                      const unsigned int right_images_count,
-                                                      unsigned int* const diff_results);
-
-extern "C" void* gpu_backend_memory_allocator(size_t bytes);
-extern "C" void gpu_backend_memory_deallocator(void* ptr);
 #else
+
 // gcc compiles as C code
+#define CUDA_EXPORT
 
-unsigned int get_max_tiles_count_per_stream();
+#endif
 
-TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_left_image,
+
+CUDA_EXPORT unsigned int get_max_tiles_count_per_stream();
+
+CUDA_EXPORT TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_left_image,
                                                  const unsigned char* const raw_right_images,
                                                  const unsigned int right_images_count,
                                                  unsigned int* const diff_results);
 
-TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_image,
+CUDA_EXPORT TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_image,
                                                       const unsigned char* const raw_right_images,
                                                       const unsigned int right_images_count,
                                                       unsigned int* const diff_results);
 
-void* gpu_backend_memory_allocator(size_t bytes);
-void gpu_backend_memory_deallocator(void* ptr);
-#endif
+CUDA_EXPORT void* gpu_backend_host_memory_allocator(size_t bytes);
+CUDA_EXPORT void gpu_backend_host_memory_deallocator(void* ptr);
+
 
 
 #endif // GPU_UTILS_H

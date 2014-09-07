@@ -336,7 +336,7 @@ TaskStatus compare_one_image_with_others(const unsigned char* const raw_left_ima
     return TASK_FAILED;
 }
 
-void* gpu_backend_memory_allocator(size_t bytes) {
+void* gpu_backend_host_memory_allocator(size_t bytes) {
     void* ptr = NULL;
 
     const cudaError_t cuda_error = cudaMallocHost(&ptr, bytes);
@@ -348,7 +348,7 @@ void* gpu_backend_memory_allocator(size_t bytes) {
     return ptr;
 }
 
-void gpu_backend_memory_deallocator(void* ptr) {
+void gpu_backend_host_memory_deallocator(void* ptr) {
     const cudaError_t cuda_error = cudaFreeHost(ptr);
 
     if (cuda_error != cudaSuccess) {

@@ -79,8 +79,8 @@ CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
         cb.memory_allocator = &cpu_backend_memory_allocator;
         cb.memory_deallocator = &cpu_backend_memory_deallocator;
     } else if(type == CUDA_GPU) {
-        cb.memory_allocator = &gpu_backend_memory_allocator;
-        cb.memory_deallocator = &gpu_backend_memory_deallocator;
+        cb.memory_allocator = &gpu_backend_host_memory_allocator;
+        cb.memory_deallocator = &gpu_backend_host_memory_deallocator;
 
         if (count < get_max_tiles_count_per_stream()) {
             cb.one_with_many_func = &compare_one_image_with_others;
@@ -110,6 +110,28 @@ unsigned int get_tile_pixels(const TileFile* const tile, unsigned char** const p
 void tile_file_destructor(TileFile* tile_file) {
     free(tile_file->data);
     free(tile_file);
+}
+
+void* load_tiles_pixels_part(void* params) {
+    const LoadTilesParams* const p = params;
+
+    unsigned char* t_pixels = NULL;
+
+    Tile* t_tile = NULL;
+
+    for (unsigned int i = 0; i < p->count; ++i) {
+        t_tile = p->tiles[i];
+
+        if(get_tile_pixels(t_tile->tile_file, &t_pixels) == 0) {
+            memcpy(p->raw_output[i], t_pixels, TILE_SIZE_BYTES);
+            p->raw_cache_output[i] = t_pixels;
+        } else {
+            printf("\n\nproblem while loading tile with id: %d!\n\n", t_tile->tile_id);
+            fflush(stdout);
+        }
+    }
+
+    return NULL;
 }
 
 void load_tiles_pixels_threads(const Tile* const * const tiles,
@@ -212,28 +234,6 @@ void load_tiles_pixels_threads(const Tile* const * const tiles,
     }
 }
 
-void* load_tiles_pixels_part(void* params) {
-    const LoadTilesParams* const p = params;
-
-    unsigned char* t_pixels = NULL;
-
-    Tile* t_tile = NULL;
-
-    for (unsigned int i = 0; i < p->count; ++i) {
-        t_tile = p->tiles[i];
-
-        if(get_tile_pixels(t_tile->tile_file, &t_pixels) != 0) {
-            printf("\n\nproblem while loading tile with id: %d!\n\n", t_tile->tile_id);
-            fflush(stdout);
-        } else {
-            memcpy(p->raw_output[i], t_pixels, TILE_SIZE_BYTES);
-            p->raw_cache_output[i] = t_pixels;
-        }
-    }
-
-    return NULL;
-}
-
 void load_pixels(const Tile* const tile,
                  CacheInfo* const cache_info,
                  unsigned char ** const pixels) {
@@ -281,7 +281,7 @@ unsigned int calc_diff(const Tile* const left_node,
 }
 
 void calc_diff_one_with_many(const Tile* const left_tile,
-                             const Tile * const *const right_tiles,
+                             const Tile* const* const right_tiles,
                              const unsigned int right_tiles_count,
                              CacheInfo* const cache_info,
                              const AppRunParams arp,
