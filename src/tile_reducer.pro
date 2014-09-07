@@ -35,7 +35,7 @@ INCLUDEPATH += "/usr/include/postgresql"
 
 LIBS += -lpq -pthread
 
-QMAKE_CFLAGS = -std=c99 -D_BSD_SOURCE # for(int i=0), DT_DIR
+QMAKE_CFLAGS = -std=c99 # for(int i=0)
 
 CUDA_SOURCES += \
     gpu_utils.cu \
