@@ -4,13 +4,11 @@
 #include <stdlib.h>
 
 #define IS_STRINGS_EQUAL(str0, st1) (strcmp(str0, st1) == 0)
-#define IS_STRINGS_NOT_EQUAL(str0, st1) (strcmp(str0, st1) != 0)
 
 #define PARAM_NOT_FOUND "false"
 #define PARAM_FOUND "true"
 
 #define IS_PARAM_FOUND(param) (IS_STRINGS_EQUAL(param, PARAM_NOT_FOUND) == 0)
-#define IS_PARAM_NOT_FOUND(param) IS_STRINGS_EQUAL(param, PARAM_NOT_FOUND)
 
 
 char* get_arg(const int argc, char** argv, const char* const key) {
@@ -36,7 +34,7 @@ tile_reducer_params tile_reducer_params_make_from_args(const int argc, char** co
 
     const char* const max_diff_pixels_param = get_arg(argc, argv, tile_reducer_param_max_diff_pixels);
 
-    if (IS_PARAM_NOT_FOUND(max_diff_pixels_param)) {
+    if (IS_PARAM_FOUND(max_diff_pixels_param)) {
         arp.max_diff_pixels = atoi(max_diff_pixels_param);
     }
 

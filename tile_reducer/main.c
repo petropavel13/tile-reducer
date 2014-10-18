@@ -99,7 +99,7 @@ int main(int argc, char** argv)
 
     iterate_tree(results, &ctx, &iterate_tree_callback);
 
-    tile_reducer_log_info("%u tiles reduced to %u with max different pixels = %u", total, ctx.reduced_count, arp.max_diff_pixels);
+    tile_reducer_log_info("%u tiles reduced to %u with max different pixels = %u", total, total - ctx.reduced_count, arp.max_diff_pixels);
 
     destroy_tree(results, &free);
 
