@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include "tile_utils.h"
+#include "logging.h"
 
 typedef struct DevicePointers {
     unsigned char* left_raw_image;
@@ -53,10 +54,11 @@ typedef struct RunParams {
 
 
 #define CHECK_ERROR_VERBOSE_LEAVE( cuda_error, action_str, leave_label, error_var ) \
-    if(cuda_error != cudaSuccess) { \
-        printf("cuda error at %d : %s \naction: %s \n", __LINE__, cudaGetErrorString(cuda_error), action_str); \
-        fflush(stdout); \
-        error_var = cuda_error;\
+    if((error_var = cuda_error) != cudaSuccess) { \
+        tile_reducer_current_filename_and_line_string_declare\
+        tile_reducer_current_filename_and_line_to_string();\
+        \
+        tile_reducer_log_error("Action: %s failed. CUDA error: \"%s\" in %s", action_str, cudaGetErrorString(cuda_error), tile_reducer_current_filename_and_line_string);\
         goto leave_label; \
     }
 
@@ -124,7 +126,6 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
                                                  const unsigned char* const raw_right_images,
                                                  const unsigned int right_images_count,
                                                  unsigned int* const diff_results) {
-
     cudaError_t error = cudaSuccess;
 
     int cudaDevNumber = 0;
@@ -142,7 +143,7 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
     cudaMemGetInfo(&available_memory, &total_memory);
 
     const unsigned int max_r_tiles_by_mem_ideal = floor((double)(available_memory - TILE_SIZE_BYTES) / (double)(TILE_SIZE_BYTES * 2 + DIFF_CONVOLUTION_Z_SIZE + DIFF_CONVOLUTION_Y_SIZE + DIFF_CONVOLUTION_X_SIZE));
-    const unsigned int max_r_tiles_by_mem = max_r_tiles_by_mem_ideal * 0.95;
+    const unsigned int max_r_tiles_by_mem = max_r_tiles_by_mem_ideal * 0.95; // 95%
     const unsigned int tiles_per_loop = right_images_count > max_r_tiles_by_mem ? max_r_tiles_by_mem : right_images_count;
     const unsigned int full_loops_count = floor((double)right_images_count / (double)max_r_tiles_by_mem);
     const unsigned int loops_count = ceil((double)right_images_count / (double)max_r_tiles_by_mem);
@@ -158,7 +159,7 @@ TaskStatus compare_one_image_with_others_streams(const unsigned char* const raw_
     DevicePointers sPointers[streams_count];
 
     unsigned char* pinned_left_raw_image = NULL;
-    const unsigned char* const pinned_right_raw_images = raw_right_images;// we already use cuda allocator
+    const unsigned char* const pinned_right_raw_images = raw_right_images; // we already use cuda allocator
 
     unsigned char* d_left_image = NULL;
 
@@ -342,7 +343,10 @@ void* gpu_backend_host_memory_allocator(size_t bytes) {
     const cudaError_t cuda_error = cudaMallocHost(&ptr, bytes);
 
     if (cuda_error != cudaSuccess) {
-        printf("cuda error at %d : %s \naction: %s \n", __LINE__, cudaGetErrorString(cuda_error), "cudaMallocHost"); \
+        tile_reducer_current_filename_and_line_string_declare
+        tile_reducer_current_filename_and_line_to_string();
+
+        tile_reducer_log_error("%s Action: cudaMallocHost. CUDA error: \"%s\"", tile_reducer_current_filename_and_line_string, cudaGetErrorString(cuda_error));\
     }
 
     return ptr;
@@ -352,7 +356,10 @@ void gpu_backend_host_memory_deallocator(void* ptr) {
     const cudaError_t cuda_error = cudaFreeHost(ptr);
 
     if (cuda_error != cudaSuccess) {
-        printf("cuda error at %d : %s \naction: %s \n", __LINE__, cudaGetErrorString(cuda_error), "cudaFreeHost"); \
+        tile_reducer_current_filename_and_line_string_declare
+        tile_reducer_current_filename_and_line_to_string();
+
+        tile_reducer_log_error("%s Action: cudaFreeHost. CUDA error: \"%s\"", tile_reducer_current_filename_and_line_string, cudaGetErrorString(cuda_error));\
     }
 }
 

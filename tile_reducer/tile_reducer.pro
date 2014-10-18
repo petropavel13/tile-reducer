@@ -3,18 +3,7 @@ CONFIG += console
 CONFIG -= app_bundle
 CONFIG -= qt
 
-SOURCES += main.c \
-    image_generation_utils.c \
-    cpu_test_suite.c \
-    gpu_test_suite.c \
-    reduce_test_suite.c
-
-HEADERS += \
-    tile_utils_i.h \
-    image_generation_utils.h \
-    cpu_test_suite.h \
-    gpu_test_suite.h \
-    reduce_test_suite.h
+SOURCES += main.c
 
 QMAKE_CFLAGS = -std=c99
 

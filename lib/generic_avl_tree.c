@@ -171,3 +171,29 @@ void calc_elements_count(const GenericNode* const node, unsigned long *const cou
         calc_elements_count(node->right, count);
     }
 }
+
+GenericNode* shallow_copy_node(GenericNode* const src, GenericNode* const dest) {
+    GenericNode* new_head = dest;
+
+    if (src != NULL) {
+        new_head = insert(dest, src->key, src->data);
+
+        new_head = shallow_copy_node(src->left, new_head);
+        new_head = shallow_copy_node(src->right, new_head);
+    }
+
+    return new_head;
+}
+
+void iterate_tree(GenericNode* const head,
+                  void* const callback_context,
+                  void (*callback)(GenericNode* const, void* const)) {
+    if (head == NULL) {
+        return;
+    }
+
+    callback(head, callback_context);
+
+    iterate_tree(head->left, callback_context, callback);
+    iterate_tree(head->right, callback_context, callback);
+}

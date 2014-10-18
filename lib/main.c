@@ -7,11 +7,13 @@
 #include "db_utils.h"
 #include "cluster_utils.h"
 #include "color_index_utils.h"
-#include "apprunparams.h"
+#include "params.h"
 #include "fs_utils.h"
+#include "logging.h"
 
 #include <libpq-fe.h>
 #include <pthread.h>
+#include <log4c.h>
 
 #define IS_STRINGS_EQUAL(str0, st1) (strcmp(str0, st1) == 0)
 #define IS_STRINGS_NOT_EQUAL(str0, st1) (strcmp(str0, st1) != 0)
@@ -63,10 +65,45 @@ void read_files_callback(const char* file_path, void* const context) {
 }
 
 
-void print_progress_tiles_db_write(const unsigned int current) {
-    printf("\r                            ");
-    printf("\rWriting tiles paths to DB...%d", current);
-    fflush(stdout);
+typedef struct TilesInsertContext {
+    unsigned int count;
+    unsigned int current_index;
+    unsigned int* tiles_ids;
+#ifndef NO_LOG
+    unsigned char last_log_percent;
+#endif
+} TilesInsertContext;
+
+TilesInsertContext* tiles_insert_context_new(const unsigned int tiles_count) {
+    TilesInsertContext* const ctx = malloc(sizeof(TilesInsertContext));
+    ctx->count = tiles_count;
+    ctx->current_index = 0;
+    ctx->tiles_ids = malloc(sizeof(unsigned int) * tiles_count);
+
+    return ctx;
+}
+
+void tiles_insert_context_free(TilesInsertContext* const ctx) {
+    free(ctx->tiles_ids);
+    free(ctx);
+}
+
+void tiles_insert_callback(const unsigned int tile_id, void* const callback_context) {
+    TilesInsertContext* const ctx = callback_context;
+    ctx->tiles_ids[ctx->current_index++] = tile_id;
+
+#ifndef NO_LOG
+    const unsigned char percent_done = ceil(ctx->current_index / (ctx->count / 100.0));
+
+    if (percent_done != ctx->last_log_percent) {
+        ctx->last_log_percent = percent_done;
+
+        if (percent_done % 25 == 0) { // 0, 25, 50, 75, 100
+            tile_reducer_log_info("Inserting tiles in db: %d%% done", percent_done);
+        }
+    }
+
+#endif
 }
 
 void print_progress_index_colors(const unsigned char percent_done) {
@@ -119,7 +156,9 @@ GenericNode* get_tails(GenericNode* const tail, const GenericNode* const tiles_n
 }
 
 
-void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_threads) {
+void run_index_threads(GenericNode* const tiles_tree, tile_reducer_params arp) {
+    const unsigned int num_threads = arp.max_num_threads;
+
     pthread_t threads[num_threads];
     GenericNode * heads[num_threads];
     DbInfo * connections[num_threads];
@@ -127,7 +166,7 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
 
     for (unsigned char i = 0; i < num_threads; ++i) {
         heads[i] = get_head(tiles_tree, num_threads >> 2, i);
-        connections[i] = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 2);
+        connections[i] = create_db_info(PQconnectdb(CONNECTION_STRING), arp.max_sql_string_size / num_threads);
         th_params[i].tiles_tree = heads[i];
         th_params[i].index_callback = &print_progress_index_colors;
         th_params[i].flush_callback = &print_progress_tiles_colors_db_write;
@@ -138,7 +177,7 @@ void run_index_threads(GenericNode* const tiles_tree, const unsigned char num_th
 
     GenericNode* const tails = get_tails(create_node(tiles_tree->key, tiles_tree->data), tiles_tree, num_threads >> 2);
 
-    DbInfo* const db_info = create_db_info(PQconnectdb(CONNECTION_STRING), 1024 * 1024 * 2);
+    DbInfo* const db_info = create_db_info(PQconnectdb(CONNECTION_STRING), arp.max_sql_string_size / num_threads);
     TCTParams params;
     params.tiles_tree = tails;
     params.index_callback = NULL;
@@ -179,9 +218,9 @@ void print_help() {
 }
 
 
-int main(int argc, char* argv [])
+int main(int argc, char** argv)
 {
-    AppRunParams arp = make_default_app_run_params();
+    tile_reducer_params arp = tile_reducer_params_make_default();
 
     const char* const path = get_arg(argc, argv, "--path");
     const char* const max_diff_pixels_param = get_arg(argc, argv, "--max_diff_pixels");
@@ -200,6 +239,8 @@ int main(int argc, char* argv [])
     }
 
     const char* const max_num_threads_param = get_arg(argc, argv, "--max_threads");
+
+    log4c_init();
 
     if (IS_PARAM_FOUND(max_num_threads_param)) {
         const unsigned char max_num_threads = atoi(max_num_threads_param);
@@ -220,7 +261,7 @@ int main(int argc, char* argv [])
                           (unsigned int) arp.max_num_threads
         );
 
-    FilePathList* fp_head = malloc(sizeof(FilePathList));
+    FilePathList* const fp_head = malloc(sizeof(FilePathList));
 
     FSWalkerContext fs_walker_ctx;
     fs_walker_ctx.count = 0;
@@ -274,7 +315,7 @@ int main(int argc, char* argv [])
     unsigned int not_used = 0;
 
     if(res == TILES_ALREADY_EXISTS) {
-        printf("Tiles already in db. Reading ids...\n");
+        tile_reducer_log_info("Tiles already in db. Reading ids...");
 
         clear_session_data(db_info);
 
@@ -283,28 +324,31 @@ int main(int argc, char* argv [])
         clear_all_data(db_info); // reset sequences
 
         pg_ids = malloc(sizeof(unsigned int) * total);
-        write_tiles_paths(db_info, (const char * const * const)tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        TilesInsertContext* const ctx = tiles_insert_context_new(total);
 
-        printf("\r                                                ");
-        printf("\rWriting tiles paths to DB...done\n");
-        fflush(stdout);
+        insert_tiles_info(db_info, (const char * const * const)tiles_paths, total, ctx, &tiles_insert_callback);
+
+        memcpy(pg_ids, ctx->tiles_ids, sizeof(unsigned int) * total);
+
+        tiles_insert_context_free(ctx);
     } else if(res == TILES_COUNT_MISMATCH) {
-        printf("Tiles count mismatch. Clean up db.\n");
-        fflush(stdout);
+        tile_reducer_log_info("Tiles count mismatch. Clean up db.");
 
         clear_all_data(db_info);
 
         pg_ids = malloc(sizeof(unsigned int) * total);
-        write_tiles_paths(db_info, (const char * const * const)tiles_paths, total, pg_ids, &print_progress_tiles_db_write);
+        TilesInsertContext* const ctx = tiles_insert_context_new(total);
 
-        printf("\r                                                ");
-        printf("\rWriting tiles paths to DB...done\n");
-        fflush(stdout);
+        insert_tiles_info(db_info, (const char * const * const)tiles_paths, total, ctx, &tiles_insert_callback);
+
+        memcpy(pg_ids, ctx->tiles_ids, sizeof(unsigned int) * total);
+
+        tiles_insert_context_free(ctx);
     }
 
     const size_t diffs_cache_size = floor(arp.max_cache_size * 0.05);
 
-    CacheInfo* const cache_info = init_cache(diffs_cache_size, arp.max_cache_size - diffs_cache_size, TILE_SIZE_BYTES);
+    CacheInfo* const cache_info = cache_info_new(diffs_cache_size, arp.max_cache_size - diffs_cache_size, TILE_SIZE_BYTES);
 
     Tile* temp_tile = malloc(sizeof(Tile));
     temp_tile->tile_id = pg_ids[0];
@@ -355,7 +399,7 @@ int main(int argc, char* argv [])
         } else {
 //            printf("Indexing and writing tiles color %u threads...", max_num_threads);
             fflush(stdout);
-            run_index_threads(all_tiles, arp.max_num_threads);
+            run_index_threads(all_tiles, arp);
 //            printf("\rIndexing and writing tiles color %u threads...done\n", max_num_threads);
             fflush(stdout);
         }
@@ -383,7 +427,7 @@ int main(int argc, char* argv [])
         clusterize_simple(all_tiles, total, arp, db_info, cache_info);
     }
 
-    destroy_tree(all_tiles, &tile_destructor);
+    destroy_tree(all_tiles, &tile_free);
 
     const unsigned long images_hits = cache_info->image_hit_count;
     const unsigned long images_misses = cache_info->image_miss_count;
@@ -394,7 +438,7 @@ int main(int argc, char* argv [])
     printf("images | hits: %lu, misses: %lu, ratio: %.2Lf\n", images_hits, images_misses, ((long double) images_hits / (long double) images_misses));
     printf("diffs  | hits: %lu, misses: %lu, ratio: %.2Lf\n", diffs_hits, diffs_misses, ((long double) diffs_hits / (long double) diffs_misses));
 
-    destroy_cache(cache_info);
+    cache_info_free(cache_info);
 
     destroy_db_info(db_info);
 

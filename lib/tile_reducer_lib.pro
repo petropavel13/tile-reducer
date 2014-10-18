@@ -1,18 +1,18 @@
 TEMPLATE = lib
+TARGET = treducer
 CONFIG += console
 CONFIG -= qt
 CONFIG -= app_bundle
 CONFIG += staticlib
 
-SOURCES += main.c \
-    tile_utils.c \
+SOURCES += tile_utils.c \
     lodepng.c \
     cache_utils.c \
-    db_utils.c \
-    cluster_utils.c \
     generic_avl_tree.c \
-    color_index_utils.c \
-    fs_utils.c
+    fs_utils.c \
+    logging.c \
+    reduce_utils.c \
+    params.c
 
 OTHER_FILES += \
     cuda_functions.cu \
@@ -23,23 +23,24 @@ HEADERS += \
     lodepng.h \
     tile_utils.h \
     cache_utils.h \
-    db_utils.h \
     gpu_utils.h \
-    cluster_utils.h \
     generic_avl_tree.h \
-    color_index_utils.h \
-    apprunparams.h \
-    fs_utils.h
+    fs_utils.h \
+    logging.h \
+    params.h \
+    reduce_utils.h
 
-INCLUDEPATH += "/usr/include/postgresql"
+LIBS += -pthread
 
-LIBS += -lpq -pthread
+LIBS += -llog4c
+#DEFINES += NO_LOG
+#NVCC_OPTIONS += -DNO_LOG
 
 QMAKE_CFLAGS = -std=c99 # for(int i=0)
 
 CUDA_SOURCES += \
     gpu_utils.cu \
-    cuda_functions.cu
+    cuda_functions.cu \
 
 CUDA_DIR = "/usr/local/cuda-5.5"
 
@@ -47,7 +48,7 @@ SYSTEM_NAME = unix
 SYSTEM_TYPE = 64
 CUDA_ARCH = sm_21
 
-NVCC_OPTIONS = --use_fast_math
+NVCC_OPTIONS += --use_fast_math
 
 QMAKE_LIBDIR += $$CUDA_DIR/lib64/
 

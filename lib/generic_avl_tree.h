@@ -59,4 +59,14 @@ static inline unsigned long make_key(const unsigned int x, const unsigned int y)
     return max * max + max + min;
 }
 
+GenericNode* shallow_copy_node(GenericNode* const src, GenericNode* const dest);
+
+static inline GenericNode* shallow_copy_tree(GenericNode* const node) {
+    return shallow_copy_node(node, NULL);
+}
+
+void iterate_tree(GenericNode* const head,
+                  void* const callback_context,
+                  void (*callback)(GenericNode* const, void* const));
+
 #endif // GENERIC_AVL_TREE_H

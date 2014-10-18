@@ -8,18 +8,19 @@
 #include <dirent.h>
 #include "lodepng.h"
 #include "gpu_utils.h"
+#include "logging.h"
 
 #define MIN_TILES_PER_THREAD 256
 #define MIN_TILES_FOR_MULTITHREADING (MIN_TILES_PER_THREAD * 2)
 
 typedef struct CompareBackend {
     unsigned int (*one_with_one_func)(const unsigned char* const,
-                                        const unsigned char* const);
+                                      const unsigned char* const);
 
     TaskStatus (*one_with_many_func)(const unsigned char* const,
-                               const unsigned char* const,
-                               const unsigned int,
-                               unsigned int* const);
+                                     const unsigned char* const,
+                                     const unsigned int,
+                                     unsigned int* const);
 
     void* (*memory_allocator)(size_t);
     void (*memory_deallocator)(void*);
@@ -36,8 +37,8 @@ typedef struct LoadTilesParams {
 
 
 
-unsigned int compare_images_one_with_one_cpu(const unsigned char * const raw_left_image,
-                                               const unsigned char * const raw_right_image) {
+unsigned int compare_images_one_with_one_cpu(const unsigned char* const raw_left_image,
+                                             const unsigned char* const raw_right_image) {
     unsigned int res = 0;
 
     for (unsigned int i = 0; i < TILE_SIZE; i += 4) {
@@ -95,21 +96,30 @@ CompareBackend make_backend(CompareBackendType type, const unsigned int count) {
 TileFile* read_tile(const char* absolute_file_path) {
     TileFile* const tile = malloc(sizeof(TileFile));
 
-    lodepng_load_file(&tile->data, &tile->size_bytes, absolute_file_path);
+    const unsigned int lodepng_error = lodepng_load_file(&tile->data, &tile->size_bytes, absolute_file_path);
+
+    if (lodepng_error != 0) {
+        tile_reducer_current_filename_and_line_string_declare
+                tile_reducer_current_filename_and_line_to_string();
+
+        tile_reducer_log_error("%s Failed to read_tile. LodePNG error: \"%s\"", tile_reducer_current_filename_and_line_string, lodepng_error_text(lodepng_error));
+    }
 
     return tile;
 }
 
 
-unsigned int get_tile_pixels(const TileFile* const tile, unsigned char** const pixels) {
+void get_tile_pixels(const TileFile* const tile, unsigned char** const pixels) {
     unsigned int width, height;
 
-    return lodepng_decode32(pixels, &width, &height, tile->data, tile->size_bytes);
-}
+    const unsigned int lodepng_error = lodepng_decode32(pixels, &width, &height, tile->data, tile->size_bytes);
 
-void tile_file_destructor(TileFile* tile_file) {
-    free(tile_file->data);
-    free(tile_file);
+    if (lodepng_error != 0) {
+        tile_reducer_current_filename_and_line_string_declare
+                tile_reducer_current_filename_and_line_to_string();
+
+        tile_reducer_log_error("%s Failed to load tile pixels. LodePNG error: \"%s\"", tile_reducer_current_filename_and_line_string, lodepng_error_text(lodepng_error));
+    }
 }
 
 void* load_tiles_pixels_part(void* params) {
@@ -122,22 +132,18 @@ void* load_tiles_pixels_part(void* params) {
     for (unsigned int i = 0; i < p->count; ++i) {
         t_tile = p->tiles[i];
 
-        if(get_tile_pixels(t_tile->tile_file, &t_pixels) == 0) {
-            memcpy(p->raw_output[i], t_pixels, TILE_SIZE_BYTES);
-            p->raw_cache_output[i] = t_pixels;
-        } else {
-            printf("\n\nproblem while loading tile with id: %d!\n\n", t_tile->tile_id);
-            fflush(stdout);
-        }
+        get_tile_pixels(t_tile->tile_file, &t_pixels);
+        memcpy(p->raw_output[i], t_pixels, TILE_SIZE_BYTES);
+        p->raw_cache_output[i] = t_pixels;
     }
 
     return NULL;
 }
 
-void load_tiles_pixels_threads(const Tile* const * const tiles,
+void load_tiles_pixels_threads(const Tile* const* const tiles,
                                const unsigned int count,
                                CacheInfo* const cache_info,
-                               const AppRunParams arp,
+                               const tile_reducer_params arp,
                                unsigned char* const raw_tiles) {
     const Tile* tile_for_decode[count];
     unsigned int index_mapping[count];
@@ -158,16 +164,12 @@ void load_tiles_pixels_threads(const Tile* const * const tiles,
         }
     }
 
-    if (count_for_decode < MIN_TILES_FOR_MULTITHREADING) {
+    if (count_for_decode < MIN_TILES_FOR_MULTITHREADING || arp.max_num_threads < 2) {
         for (unsigned int i = 0; i < count_for_decode; ++i) {
             t_tile = tile_for_decode[i];
 
-            if(get_tile_pixels(t_tile->tile_file, &t_raw_tile) != 0) {
-                printf("\n\nproblem while loading tile with id: %d!\n\n", t_tile->tile_id);
-                fflush(stdout);
-            } else {
-                memcpy(&(raw_tiles[index_mapping[i] * TILE_SIZE]), t_raw_tile, TILE_SIZE_BYTES);
-            }
+            get_tile_pixels(t_tile->tile_file, &t_raw_tile);
+            memcpy(&(raw_tiles[index_mapping[i] * TILE_SIZE]), t_raw_tile, TILE_SIZE_BYTES);
 
             push_image_to_cache(t_tile->tile_id, t_raw_tile, cache_info);
         }
@@ -198,7 +200,7 @@ void load_tiles_pixels_threads(const Tile* const * const tiles,
                     .count = tiles_per_thread,
                     .raw_output = raw_tiles_links + t_offset,
                     .raw_cache_output = &cache_out[t_offset],
-                };
+        };
             t_offset += tiles_per_thread;
         }
 
@@ -208,7 +210,7 @@ void load_tiles_pixels_threads(const Tile* const * const tiles,
                 .count = count_for_decode - t_offset,
                 .raw_output = raw_tiles_links + t_offset,
                 .raw_cache_output = &cache_out[t_offset],
-            };
+    };
 
         for (unsigned char i = 0; i < num_threads; ++i) {
             pthread_create(&threads[i], NULL, &load_tiles_pixels_part, &ltps[i]);
@@ -240,12 +242,8 @@ void load_pixels(const Tile* const tile,
     unsigned char* t_pixels = NULL;
 
     if(get_tile_data(tile->tile_id, cache_info, &t_pixels) == CACHE_MISS) {
-        if(get_tile_pixels(tile->tile_file, &t_pixels) == 0) {
-            push_image_to_cache(tile->tile_id, t_pixels, cache_info);
-        } else {
-            printf("\n\nproblem while loading tile with id: %d!\n\n", tile->tile_id);
-            fflush(stdout);
-        }
+        get_tile_pixels(tile->tile_file, &t_pixels);
+        push_image_to_cache(tile->tile_id, t_pixels, cache_info);
     }
 
     *pixels = malloc(TILE_SIZE_BYTES);
@@ -254,8 +252,8 @@ void load_pixels(const Tile* const tile,
 }
 
 unsigned int calc_diff(const Tile* const left_node,
-                             const Tile* const right_node,
-                             CacheInfo* const cache_info) {
+                       const Tile* const right_node,
+                       CacheInfo* const cache_info) {
     unsigned int diff_result;
     const unsigned long key = make_key(left_node->tile_id, right_node->tile_id);
 
@@ -272,7 +270,7 @@ unsigned int calc_diff(const Tile* const left_node,
     const CompareBackend cb = make_backend(CPU, 1);
 
     diff_result = cb.one_with_one_func(left_tile_pixels, right_tile_pixels);
-    push_edge_to_cache(key, diff_result, cache_info);
+    push_diff_to_cache(key, diff_result, cache_info);
 
     free(left_tile_pixels);
     free(right_tile_pixels);
@@ -284,7 +282,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
                              const Tile* const* const right_tiles,
                              const unsigned int right_tiles_count,
                              CacheInfo* const cache_info,
-                             const AppRunParams arp,
+                             const tile_reducer_params arp,
                              unsigned int* const results) {
     const Tile* right_tiles_for_load[right_tiles_count];
     unsigned long keys_for_load[right_tiles_count];
@@ -335,7 +333,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
         }
 
         for (unsigned int j = 0; j < tiles_per_mem_loop; ++j) {
-            push_edge_to_cache(keys_for_load[t_offset + j], t_results[j], cache_info);
+            push_diff_to_cache(keys_for_load[t_offset + j], t_results[j], cache_info);
             results[index_mapping[t_offset + j]] = t_results[j];
         }
 
@@ -354,7 +352,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
 
             t_results[t_offset] = t_cb.one_with_one_func(left_tile_pixels, right_tile_pixels);
 
-            push_edge_to_cache(keys_for_load[t_offset], t_results[t_offset], cache_info);
+            push_diff_to_cache(keys_for_load[t_offset], t_results[t_offset], cache_info);
             results[index_mapping[t_offset]] = t_results[t_offset];
 
             free(right_tile_pixels);
@@ -374,7 +372,7 @@ void calc_diff_one_with_many(const Tile* const left_tile,
             }
 
             for (unsigned int i = 0; i < tail_count; ++i) {
-                push_edge_to_cache(keys_for_load[t_offset + i], t_results[i], cache_info);
+                push_diff_to_cache(keys_for_load[t_offset + i], t_results[i], cache_info);
                 results[index_mapping[t_offset + i]] = t_results[i];
             }
 
@@ -385,9 +383,13 @@ void calc_diff_one_with_many(const Tile* const left_tile,
     free(left_tile_pixels);
 }
 
-void tile_destructor(void* data) {
+void tile_free(void* data) {
     Tile* const t = data;
-    tile_file_destructor(t->tile_file);
+
+    tile_file_free(t->tile_file);
+
+    if (t->file_path != NULL) free(t->file_path);
+
     free(t);
 }
 
